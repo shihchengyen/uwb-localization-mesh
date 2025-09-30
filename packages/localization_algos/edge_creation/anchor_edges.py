@@ -4,7 +4,7 @@ Pure functions for creating anchor-to-anchor edges from ground truth positions.
 
 import numpy as np
 from typing import List, Tuple
-from datatypes.datatypes import AnchorConfig
+from packages.datatypes.datatypes import AnchorConfig
 
 def create_anchor_anchor_edges(anchor_config: AnchorConfig) -> List[Tuple[str, str, np.ndarray]]:
     """

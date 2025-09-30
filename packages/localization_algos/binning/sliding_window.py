@@ -8,7 +8,7 @@ from typing import List, Dict, Optional
 from dataclasses import dataclass
 
 import numpy as np
-from datatypes.datatypes import Measurement, BinnedData
+from packages.datatypes.datatypes import Measurement, BinnedData
 
 @dataclass
 class BinningMetrics:

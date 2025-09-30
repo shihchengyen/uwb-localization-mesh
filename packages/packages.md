@@ -1,71 +1,91 @@
-# 📦 Package Roles & Responsibilities
+# 📦 UWB Localization Packages
 
-## datatypes
-Pure data classes that define the core types used across the system:
-- `Measurement`: Raw UWB measurements with phone_node_id
+Core packages for UWB-based indoor localization using pose graph optimization.
+
+## Package Overview
+
+### datatypes
+Core data structures used across the system:
+- `Measurement`: Raw UWB measurements with timestamps
 - `BinnedData`: Time-windowed measurement aggregation
-- `AnchorConfig`: Ground truth anchor positions + jittering utilities
+- `AnchorConfig`: Ground truth and jittered anchor positions
 
-## localization_algos
-Core localization logic with pure functions:
+### localization_algos
+Core localization algorithms split into three main components:
 
-### edge_creation/
-- Create anchor-anchor edges from ground truth/jittered positions
-- Transform phone measurements to relative edges
-- Coordinate system transformations
+#### edge_creation/
+- Transform local measurements to global frame
+- Create anchor-anchor edges from ground truth
+- Support for jittered anchor positions
 
-### binning/
-- Pure sliding window implementation (1s default)
-- Measurement aggregation and validation
-- Late data handling
+#### binning/
+- Sliding window implementation (1s default)
+- Late data handling with metrics
+- Thread-safe per-phone binning
 
-### pgo/
+#### pgo/
 - Pose Graph Optimization solver
-- Graph construction utilities
-- Optimization parameters and constraints
+- Proper anchoring to global frame
+- Support for jittered edges
 
-## uwb_mqtt_client (RPi)
-Pure MQTT client for UWB measurements:
-- Connect/reconnect handling
+### uwb_mqtt_client (RPi)
+Client-side MQTT handling:
 - Measurement publishing
-- Keep-alive and backoff
-- No side effects on import
+- Reconnection with backoff
+- Keep-alive handling
 
-## uwb_mqtt_server (Laptop)
-Pure MQTT server for measurement ingestion:
+### uwb_mqtt_server (Laptop)
+Server-side MQTT handling:
 - Subscribe to all RPi measurements
-- Emits per-phone binned data
-- Invokes localization callbacks
-- Thread-safe queuing
+- Pure message handling
+- Thread-safe callbacks
 
-## Usage in Bring-ups
+## Usage Example
 
-### Client (RPi)
 ```python
-# Client_bring_up.py
-self.node_id = 0
-self.uwb_mqtt_client = UwbMqttClient()
-self.audio_mqtt_client = AudioMqttClient()
-self.position = [x, y, z]  # Optional local telemetry
+# Server side
+from uwb_mqtt_server import UWBMQTTServer, MQTTConfig
+from localization_algos.binning import SlidingWindowBinner
+from localization_algos.pgo import PGOSolver
+
+# Configure MQTT
+mqtt_config = MQTTConfig(broker="localhost", port=1883)
+
+# Create server components
+server = UWBMQTTServer(config=mqtt_config)
+binner = SlidingWindowBinner(window_size_seconds=1.0)
+solver = PGOSolver()
+
+# Start processing
+server.start()
+
+# Client side
+from uwb_mqtt_client import UWBMqttClient, MQTTConfig
+
+# Configure client
+mqtt_config = MQTTConfig(broker="server_ip", port=1883)
+client = UWBMqttClient(config=mqtt_config, phone_node_id=0)
+
+# Connect and publish
+client.connect()
+client.publish_measurement(anchor_id=0, local_vector=[x, y, z])
 ```
 
-### Server (Laptop)
-```python
-# Server_bring_up.py
-self.nodes = {0: [x, y, z], 1: [x, y, z], ...}  # Ground truth
-self.uwb_mqtt_server = UwbMqttServer()
-self.user_position = [x, y, z]
-self.data = {  # Updated via MQTT callbacks
-    0: BinnedData,  # Phone 0's data
-    1: BinnedData,  # Phone 1's data
-    ...
-}
-```
+## Key Features
+- No side effects on import
+- Thread-safe data handling
+- Pure functions where possible
+- Proper error handling
+- Comprehensive metrics
+- Support for jittered testing
 
-## Key Principles
-1. No side effects on import
-2. Pure functions where possible
-3. Clear type hints and validation
-4. Thread-safe data structures
-5. Proper error handling and logging
-6. Unit tests for each component
+## Dependencies
+- numpy
+- paho-mqtt
+- scipy (for PGO)
+
+## Development
+- All packages have unit tests
+- Use type hints throughout
+- Follow PEP 8 style guide
+- Keep functions pure where possible
