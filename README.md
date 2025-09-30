@@ -91,10 +91,10 @@ flowchart LR
     C1[Client 1] -->|UWB measurement| MQTTC
   end
 
-  MQTTC -->|subscribe| S[Server Bring‑up]
-  S -->|bin 1s windows<br/>avg per anchor| L[localization‑algos]
+  MQTTC -->|subscribe| S[Server Bring-up]
+  S -->|bin 1s windows\navg per anchor| L[localization-algos]
   L -->|edges (anchor→phone)| PGO[PGO Solver]
-  PGO -->|graph solution<br/>(global positions)| OUT[Outputs]
+  PGO -->|graph solution\n(global positions)| OUT[Outputs]
 
   subgraph Outputs
     R[Basic_render_graph]:::demo
@@ -105,6 +105,7 @@ flowchart LR
   OUT --> R
   OUT --> F
   OUT --> A
+
   classDef demo fill:#eef,stroke:#99f;
 ```
 
