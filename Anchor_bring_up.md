@@ -21,6 +21,16 @@ Each Raspberry Pi runs the same `Anchor_bring_up.py` script, which automatically
 - 4 UWB anchor modules connected via USB serial
 - Network connectivity to MQTT broker
 
+- Time syncing to external server
+```bash 
+sudo apt-get install -y chrony
+sudo chronyd -q 'server pool.ntp.org iburst'
+```
+- time syncing on mac
+```bash
+sudo sntp -sS pool.ntp.org
+```
+
 ### 2. Software Dependencies
 ```bash
 # On each Raspberry Pi
@@ -144,14 +154,9 @@ Then you only need to set `MQTT_BROKER` and the script will auto-detect the anch
 
 ### Common Issues
 
-**1. "Could not determine anchor ID"**
-- Set `ANCHOR_ID` environment variable
-- Or use `--anchor-id` command line argument
-- Or rename hostname to include anchor number
+**1. "Clock synchronization issues"**
 
-**2. "Failed to connect to MQTT broker"**
-- Check network connectivity
-- Verify MQTT broker IP in `MQTT_BROKER`
+**2. "Could not determine anchor ID"**
 - Ensure MQTT broker is running and accessible
 
 **3. "Failed to start UWB hardware interface"**
