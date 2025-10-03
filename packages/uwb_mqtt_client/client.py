@@ -1,17 +1,19 @@
 """
 UWB MQTT Client - Publishes UWB measurements from RPi.
+Supports both programmatic API and integrated hardware interface.
 """
 
 import json
 import logging
 import threading
 import time
-from typing import Optional
+from typing import Optional, Dict
 
 import paho.mqtt.client as mqtt
 import numpy as np
 
 from .config import MQTTConfig
+from .uwb_hardware import UWBHardwareInterface, UWBConfig, ProcessedUWBMeasurement
 
 # Setup JSON logging
 logging.basicConfig(
@@ -24,41 +26,50 @@ class UWBMQTTClient:
     """
     MQTT client for publishing UWB measurements.
     Handles reconnection and backoff.
+    Supports both programmatic API and integrated UWB hardware interface.
     """
-    
+
     def __init__(
         self,
         config: MQTTConfig,
-        phone_node_id: int
+        phone_node_id: int,
+        uwb_config: Optional[UWBConfig] = None
     ):
         """
         Initialize the MQTT client.
-        
+
         Args:
             config: MQTT configuration
             phone_node_id: Identifier for this phone node
+            uwb_config: Optional UWB hardware configuration for integrated hardware interface
         """
         self.config = config
         self.phone_node_id = phone_node_id
-        
+
         # MQTT client
         self._client = mqtt.Client(
             client_id=f"{config.client_id}_{phone_node_id}",
             userdata={'client': self},
             protocol=mqtt.MQTTv311
         )
-        
+
         # Set callbacks
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
-        
+
         # Set auth if provided
         if config.username and config.password:
             self._client.username_pw_set(config.username, config.password)
-            
+
         # Reconnection state
         self._reconnect_delay = self.config.reconnect_delay_min
         self._stop_event = threading.Event()
+
+        # UWB hardware interface (optional)
+        self.uwb_interface = None
+        if uwb_config:
+            self.uwb_interface = UWBHardwareInterface(uwb_config)
+            self.uwb_interface.set_measurement_callback(self._on_uwb_measurement)
         
     def connect(self):
         """Connect to the MQTT broker."""
@@ -84,15 +95,40 @@ class UWBMQTTClient:
             raise
             
     def disconnect(self):
-        """Disconnect from the MQTT broker."""
+        """Disconnect from the MQTT broker and stop UWB interface."""
         self._stop_event.set()
+
+        # Stop UWB interface if running
+        if self.uwb_interface:
+            self.uwb_interface.stop()
+
         self._client.loop_stop()
         self._client.disconnect()
-        
+
         logger.info(json.dumps({
             "event": "client_disconnected",
             "phone_node_id": self.phone_node_id
         }))
+
+    def start_uwb_interface(self) -> bool:
+        """Start the UWB hardware interface if configured."""
+        if not self.uwb_interface:
+            logger.warning("No UWB interface configured")
+            return False
+
+        return self.uwb_interface.start()
+
+    def _on_uwb_measurement(self, measurement: ProcessedUWBMeasurement):
+        """Handle incoming measurements from UWB hardware interface."""
+        # Convert to numpy array and publish
+        local_vector = np.array(measurement.vector_local)
+        timestamp = measurement.timestamp_ns / 1e9  # Convert ns to seconds
+
+        self.publish_measurement(
+            anchor_id=measurement.anchor_id,
+            local_vector=local_vector,
+            timestamp=timestamp
+        )
         
     def publish_measurement(
         self,
@@ -122,18 +158,18 @@ class UWBMQTTClient:
             }
         }
         
-        # Publish
-        topic = f"{self.config.base_topic}/{self.phone_node_id}/measurements"
+        # Publish to anchor-centric topic (compatible with server)
+        topic = f"{self.config.base_topic}/anchor/{anchor_id}/vector"
         self._client.publish(
             topic,
             json.dumps(payload),
             qos=self.config.qos
         )
-        
+
         logger.debug(json.dumps({
             "event": "measurement_published",
-            "phone_node_id": self.phone_node_id,
-            "anchor_id": anchor_id
+            "anchor_id": anchor_id,
+            "topic": topic
         }))
         
     def _on_connect(self, client: mqtt.Client, userdata: Dict, flags: Dict, rc: int):

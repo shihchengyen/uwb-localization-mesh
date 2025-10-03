@@ -117,17 +117,28 @@ class UWBMQTTServer:
     def _on_message(self, client: mqtt.Client, userdata: Dict, msg: mqtt.MQTTMessage):
         """Parse message and emit via callback."""
         try:
-            # Parse topic to get phone_node_id
+            # Parse topic to get anchor_id (format: uwb/anchor/{anchor_id}/vector)
             parts = msg.topic.split('/')
-            if len(parts) < 2:
-                raise ValueError(f"Invalid topic format: {msg.topic}")
-            phone_node_id = int(parts[1])
-            
-            # Parse payload
+            if len(parts) < 4 or parts[1] != 'anchor' or parts[3] != 'vector':
+                raise ValueError(f"Invalid topic format: {msg.topic}. Expected: uwb/anchor/{{anchor_id}}/vector")
+            anchor_id = int(parts[2])
+
+            # Parse payload (anchor publishes measurements about the phone)
             payload = json.loads(msg.payload.decode('utf-8'))
+
+            # Convert timestamp from nanoseconds to seconds if present
+            timestamp = time.time()  # default fallback
+            if 't_unix_ns' in payload:
+                timestamp = payload['t_unix_ns'] / 1e9  # nanoseconds to seconds
+            elif 'timestamp' in payload:
+                timestamp = payload['timestamp']
+
+            # For single-phone setup, phone_node_id is always 0
+            phone_node_id = 0
+
             measurement = Measurement(
-                timestamp=payload.get('timestamp', time.time()),
-                anchor_id=payload['anchor_id'],
+                timestamp=timestamp,
+                anchor_id=anchor_id,
                 phone_node_id=phone_node_id,
                 local_vector=np.array([
                     payload['vector_local']['x'],
@@ -135,19 +146,21 @@ class UWBMQTTServer:
                     payload['vector_local']['z']
                 ])
             )
-            
+
             # Emit via callback
             self.on_measurement(measurement)
-            
+
             logger.debug(json.dumps({
                 "event": "measurement_received",
                 "phone_node_id": phone_node_id,
-                "anchor_id": measurement.anchor_id
+                "anchor_id": measurement.anchor_id,
+                "topic": msg.topic
             }))
-            
+
         except Exception as e:
             logger.error(json.dumps({
                 "event": "message_processing_failed",
                 "error": str(e),
-                "topic": msg.topic
+                "topic": msg.topic,
+                "payload_preview": msg.payload.decode('utf-8')[:200] + "..." if len(msg.payload) > 200 else msg.payload.decode('utf-8')
             }))

@@ -4,9 +4,15 @@ Server-side MQTT handling for UWB measurements.
 
 ## Overview
 Pure MQTT server implementation that:
-- Subscribes to RPi measurements
+- Subscribes to anchor measurements (anchor-centric architecture)
 - Emits measurements via callbacks
 - No state management (handled by bring-up)
+
+## Architecture
+This server is designed for an **anchor-centric** UWB localization system where:
+- Multiple anchors (fixed positions) publish measurements about a single phone
+- Each anchor publishes to topic: `uwb/anchor/{anchor_id}/vector`
+- All measurements are attributed to phone_node_id = 0 (single phone tracking)
 
 ## Usage
 
@@ -14,8 +20,8 @@ Pure MQTT server implementation that:
 from uwb_mqtt_server import UWBMQTTServer, MQTTConfig
 
 def handle_measurement(measurement):
-    print(f"Got measurement from phone {measurement.phone_node_id}")
-    print(f"Anchor {measurement.anchor_id}: {measurement.local_vector}")
+    print(f"Got measurement from anchor {measurement.anchor_id} about phone {measurement.phone_node_id}")
+    print(f"Vector: {measurement.local_vector}")
 
 # Configure server
 config = MQTTConfig(

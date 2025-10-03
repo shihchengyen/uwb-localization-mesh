@@ -278,6 +278,8 @@ if __name__ == "__main__":
         
         # Keep main thread alive
         while True:
+            if server.user_position is not None:
+                print(f"Current position: {server.user_position}")
             time.sleep(1)
             
     except KeyboardInterrupt:

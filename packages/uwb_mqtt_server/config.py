@@ -18,7 +18,7 @@ class MQTTConfig:
     
     # Topic patterns
     base_topic: str = "uwb"
-    measurement_topic: str = "uwb/+/measurements"  # + is phone_node_id wildcard
+    measurement_topic: str = "uwb/anchor/+/vector"  # + is anchor_id wildcard (anchor-centric architecture)
     
     # Processing settings
     window_size_seconds: float = 1.0  # Default 1s sliding window
