@@ -6,7 +6,7 @@ import numpy as np
 from typing import Tuple, Dict
 
 def Rz(deg: float) -> np.ndarray:
-    """Create a rotation matrix about the Z axis."""
+    """Create a rotation matrix about the Z axis (yaw)."""
     rad = np.deg2rad(deg)
     c, s = np.cos(rad), np.sin(rad)
     return np.array([
@@ -15,14 +15,24 @@ def Rz(deg: float) -> np.ndarray:
         [0.0, 0.0, 1.0]
     ], dtype=float)
 
-# 45° "facing into the room" yaw for each board
+def Ry(deg: float) -> np.ndarray:
+    """Create a rotation matrix about the Y axis (pitch)."""
+    rad = np.deg2rad(deg)
+    c, s = np.cos(rad), np.sin(rad)
+    return np.array([
+        [c,  0.0, s],
+        [0.0, 1.0, 0.0],
+        [-s, 0.0, c]
+    ], dtype=float)
+
+# Combined rotation: 45° yaw in XY plane + 45° downward pitch
 # Local x points along heading into the room,
 # Local y is left of the board, z is up
 ANCHOR_R: Dict[int, np.ndarray] = {
-    0: Rz(225.0),  # top-right faces bottom-left
-    1: Rz(315.0),  # top-left faces bottom-right
-    2: Rz(135.0),  # bottom-right faces top-left
-    3: Rz(45.0),   # bottom-left faces top-right
+    0: Ry(-45.0) @ Rz(225.0),  # top-right faces bottom-left, + downward pitch
+    1: Ry(-45.0) @ Rz(315.0),  # top-left faces bottom-right, + downward pitch
+    2: Ry(-45.0) @ Rz(135.0),  # bottom-right faces top-left, + downward pitch
+    3: Ry(-45.0) @ Rz(45.0),   # bottom-left faces top-right, + downward pitch
 }
 
 def create_relative_measurement(

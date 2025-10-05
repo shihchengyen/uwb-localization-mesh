@@ -112,19 +112,30 @@ ANCHORS = {
     3: np.array([0.0,     0.0,    0.0]), # bottom-left (origin)
 }
 
-# 45° “facing into the room” yaw for each board; local x points along heading into the room,
-# local y is left of the board, z is up. Rotation is about +z only.
+# transformation from local anchor coordinates to global XYZ coordinates
+# 45° "facing into the room" yaw for each board (=rotate about z axis); 45° pitch downwards from ceiling (=rotate about y axis).
+# local x points along heading into the room,
+# local y is left of the board,
+# local z is up. 
 def Rz(deg: float) -> np.ndarray:
+    """Rotation matrix about Z axis (yaw)"""
     rad = np.deg2rad(deg); c, s = np.cos(rad), np.sin(rad)
     return np.array([[c, -s, 0.0],
                      [s,  c, 0.0],
                      [0.0, 0.0, 1.0]], dtype=float)
 
+def Ry(deg: float) -> np.ndarray:
+    """Rotation matrix about Y axis (pitch)"""
+    rad = np.deg2rad(deg); c, s = np.cos(rad), np.sin(rad)
+    return np.array([[c,  0.0, s],
+                     [0.0, 1.0, 0.0],
+                     [-s, 0.0, c]], dtype=float)
+
 ANCHOR_R = {
-    0: Rz(225.0),  # top-right faces bottom-left
-    1: Rz(315.0),  # top-left  faces bottom-right
-    2: Rz(135.0),  # bottom-right faces top-left
-    3: Rz(45.0),   # bottom-left  faces top-right
+    0: Ry(-45.0) @ Rz(225.0),  # top-right faces bottom-left, + downward pitch
+    1: Ry(-45.0) @ Rz(315.0),  # top-left  faces bottom-right, + downward pitch
+    2: Ry(-45.0) @ Rz(135.0),  # bottom-right faces top-left, + downward pitch
+    3: Ry(-45.0) @ Rz(45.0),   # bottom-left  faces top-right, + downward pitch
 }
 
 def load_vectors(csv_path: str):
