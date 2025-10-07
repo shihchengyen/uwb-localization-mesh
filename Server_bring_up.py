@@ -261,13 +261,28 @@ class ServerBringUp:
             time.sleep(0.01)
 
 if __name__ == "__main__":
-    # Example usage
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='UWB Server')
+    parser.add_argument('--broker', type=str, default='localhost',
+                      help='MQTT broker IP address')
+    parser.add_argument('--port', type=int, default=1883,
+                      help='MQTT broker port')
+    args = parser.parse_args()
+    
+    # Configure MQTT with command line arguments
     mqtt_config = MQTTConfig(
-        broker="localhost",
-        port=1883
+        broker=args.broker,
+        port=args.port
     )
     
-    # Start server (jitter temporarily disabled)
+    logger.info(json.dumps({
+        "event": "server_config",
+        "broker": args.broker,
+        "port": args.port
+    }))
+    
+    # Start server
     server = ServerBringUp(
         mqtt_config=mqtt_config,
         jitter_std=0.0  # Jittering disabled

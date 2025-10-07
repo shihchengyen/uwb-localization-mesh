@@ -45,11 +45,14 @@ class UWBMQTTServer:
         self.config = config
         self.on_measurement = on_measurement
         
-        # MQTT client
+        # MQTT client with unique ID to prevent duplicate connections
+        import uuid
+        unique_id = str(uuid.uuid4())
         self._client = mqtt.Client(
-            client_id=config.client_id,
+            client_id=f"{config.client_id}_{unique_id}",
             userdata={'server': self},
-            protocol=mqtt.MQTTv311
+            protocol=mqtt.MQTTv311,
+            clean_session=True
         )
         
         # Set callbacks
@@ -57,13 +60,22 @@ class UWBMQTTServer:
         self._client.on_message = self._on_message
         self._client.on_disconnect = self._on_disconnect
         
+        # Enable automatic reconnect
+        self._client.reconnect_delay_set(min_delay=1, max_delay=5)
+        
         # Set auth if provided
         if config.username and config.password:
             self._client.username_pw_set(config.username, config.password)
             
+        # Connection status
+        self._connected = False
+        self._connection_lock = threading.Lock()
+            
     def start(self):
         """Start the MQTT client."""
         try:
+            # Set longer timeout for initial connection
+            self._client._connect_timeout = 10.0  # 10 seconds
             self._client.connect(
                 self.config.broker,
                 self.config.port,
@@ -96,15 +108,32 @@ class UWBMQTTServer:
     def _on_connect(self, client: mqtt.Client, userdata: Dict, flags: Dict, rc: int):
         """Handle MQTT connection."""
         if rc == 0:
-            client.subscribe(self.config.measurement_topic, qos=self.config.qos)
+            with self._connection_lock:
+                if self._connected:
+                    # Already connected, don't subscribe again
+                    return
+                self._connected = True
+            
+            # Subscribe to all anchor vectors
+            topic = "uwb/anchor/+/vector"  # + is wildcard for anchor_id
+            client.subscribe(topic, qos=self.config.qos)
+            
             logger.info(json.dumps({
                 "event": "mqtt_connected",
-                "topic": self.config.measurement_topic
+                "topic": topic,
+                "broker": self.config.broker,
+                "qos": self.config.qos,
+                "client_id": client._client_id.decode('utf-8')
             }))
         else:
+            with self._connection_lock:
+                self._connected = False
+            
             logger.error(json.dumps({
                 "event": "mqtt_connect_failed",
-                "rc": rc
+                "rc": rc,
+                "reason": mqtt.connack_string(rc),
+                "client_id": client._client_id.decode('utf-8')
             }))
             
     def _on_disconnect(self, client: mqtt.Client, userdata: Dict, rc: int):
