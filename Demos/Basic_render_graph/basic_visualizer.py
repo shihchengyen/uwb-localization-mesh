@@ -48,6 +48,8 @@ class BasicVisualizer(ServerBringUp):
         """Initialize the visualization server."""
         # Initialize base server
         super().__init__(mqtt_config, window_size_seconds)
+        # Store config for visualization
+        self.mqtt_config = mqtt_config
         
         # Tracking data
         self.position_history = deque(maxlen=history_length)
@@ -174,8 +176,18 @@ class BasicVisualizer(ServerBringUp):
                 
                 # Update status text
                 status = [
+                    f"Connected to: {self.mqtt_config.broker}:{self.mqtt_config.port}",
                     f"Position: ({self.current_position[0]:.1f}, {self.current_position[1]:.1f}, {self.current_position[2]:.1f}) cm",
                     f"History: {len(self.position_history)} points",
+                    f"Last Update: {self.last_update.strftime('%H:%M:%S')}"
+                ]
+                self.status_text.set_text('\n'.join(status))
+            else:
+                # No position data yet
+                status = [
+                    f"Connected to: {self.mqtt_config.broker}:{self.mqtt_config.port}",
+                    "Waiting for position data...",
+                    "Make sure anchors are running and connected"
                 ]
                 self.status_text.set_text('\n'.join(status))
                 
@@ -217,17 +229,30 @@ class BasicVisualizer(ServerBringUp):
         super().stop()
 
 if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='UWB Position Visualizer')
+    parser.add_argument('--broker', type=str, default='localhost',
+                      help='MQTT broker IP address')
+    parser.add_argument('--port', type=int, default=1883,
+                      help='MQTT broker port')
+    parser.add_argument('--history', type=int, default=100,
+                      help='Number of historical positions to show')
+    args = parser.parse_args()
+    
     # Configure MQTT
     mqtt_config = MQTTConfig(
-        broker="localhost",  # Change to your MQTT broker
-        port=1883
+        broker=args.broker,
+        port=args.port
     )
+    
+    print(f"\nConnecting to MQTT broker at {args.broker}:{args.port}")
     
     # Create and start visualizer
     viz = BasicVisualizer(
         mqtt_config=mqtt_config,
         window_size_seconds=1.0,
-        history_length=100  # Keep last 100 positions
+        history_length=args.history
     )
     
     try:
