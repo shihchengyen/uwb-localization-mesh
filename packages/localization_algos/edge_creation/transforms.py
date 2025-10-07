@@ -25,14 +25,19 @@ def Ry(deg: float) -> np.ndarray:
         [-s, 0.0, c]
     ], dtype=float)
 
-# Combined rotation: 45° yaw in XY plane + 45° downward pitch
-# Local x points along heading into the room,
-# Local y is left of the board, z is up
+# Rotation from sensor's local (board-fixed) frame to global frame
+# Sensor's local frame is fixed to the board: x=forward, y=left, z=up (relative to board)
+# Boards are physically tilted 45° down from horizontal
+# When sensor reports el=0, az=0, it's along the board's forward direction (which is 45° down)
+# 
+# Transformation: Rz(yaw) @ Ry(+45°)
+#   1. Ry(+45°): Tilts board's forward direction 45° down (local x toward global -z)
+#   2. Rz(yaw): Rotates in XY plane to face room center
 ANCHOR_R: Dict[int, np.ndarray] = {
-    0: Ry(-45.0) @ Rz(225.0),  # top-right faces bottom-left, + downward pitch
-    1: Ry(-45.0) @ Rz(315.0),  # top-left faces bottom-right, + downward pitch
-    2: Ry(-45.0) @ Rz(135.0),  # bottom-right faces top-left, + downward pitch
-    3: Ry(-45.0) @ Rz(45.0),   # bottom-left faces top-right, + downward pitch
+    0: Rz(225.0) @ Ry(+45.0),  # top-right faces SW, tilted down
+    1: Rz(315.0) @ Ry(+45.0),  # top-left faces SE, tilted down
+    2: Rz(135.0) @ Ry(+45.0),  # bottom-right faces NW, tilted down
+    3: Rz(45.0) @ Ry(+45.0),   # bottom-left faces NE, tilted down
 }
 
 def create_relative_measurement(

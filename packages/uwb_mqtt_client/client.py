@@ -202,6 +202,13 @@ class UWBMQTTClient:
                 "reason": mqtt.connack_string(rc)
             }))
             
+    def _on_publish(self, client: mqtt.Client, userdata: Dict, mid: int):
+        """Handle successful publish."""
+        logger.debug(json.dumps({
+            "event": "message_published",
+            "message_id": mid
+        }))
+    
     def _on_disconnect(self, client: mqtt.Client, userdata: Dict, rc: int):
         """Handle disconnection with exponential backoff."""
         logger.warning(json.dumps({

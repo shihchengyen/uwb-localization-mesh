@@ -218,6 +218,8 @@ class UWBHardwareInterface:
           +az = right, -az = left; 0 = forward (board normal)
           +el = down,  -el = up;   0 = horizontal
           local axes: x=forward, y=left, z=up
+          
+        Note: Despite parameter name, dist_m is already in cm from sensor!
         """
         th = self._deg2rad(az_deg)
         ph = self._deg2rad(el_deg)
@@ -228,4 +230,4 @@ class UWBHardwareInterface:
         y = -dist_m * cph * sth   # minus because +az is to the RIGHT
         z = -dist_m * sph         # minus because +el is DOWN
 
-        return (x * 100, y * 100, z * 100)  # Convert to cm
+        return (x, y, z)  # Already in cm - no conversion needed!

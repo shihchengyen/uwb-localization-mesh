@@ -201,15 +201,27 @@ Environment Variables:
     print()
 
     # Status tracking
-    start_time = time.time()
-    measurement_count = 0
+    class Stats:
+        """Simple class to hold mutable state."""
+        def __init__(self):
+            self.start_time = time.time()
+            self.count = 0
+    
+    stats = Stats()
+
+    # Hook to count measurements
+    original_callback = client.uwb_interface.measurement_callback
+    def counting_callback(measurement):
+        stats.count += 1
+        if original_callback:
+            original_callback(measurement)
+    client.uwb_interface.measurement_callback = counting_callback
 
     def status_update():
-        nonlocal measurement_count
-        elapsed = time.time() - start_time
+        elapsed = time.time() - stats.start_time
         if elapsed > 0:
-            rate = measurement_count / elapsed
-            print(".1f")
+            rate = stats.count / elapsed
+            print(f"📊 Status: {stats.count} measurements in {elapsed:.1f}s (Rate: {rate:.1f} msg/s)")
 
     # Set up signal handler for graceful shutdown
     def signal_handler(sig, frame):
@@ -232,7 +244,9 @@ Environment Variables:
             if time.time() - last_status_time >= 30:
                 status_update()
                 last_status_time = time.time()
-                measurement_count = 0  # Reset counter
+                # Reset stats for next period
+                stats.count = 0
+                stats.start_time = time.time()
 
     except KeyboardInterrupt:
         signal_handler(signal.SIGINT, None)
