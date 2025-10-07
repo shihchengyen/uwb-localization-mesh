@@ -6,7 +6,7 @@ import sys
 import os
 
 # ---- config ----
-FILENAME = "crazy-carls-brickhouse-tavern.wav"  # in parent folder of this script
+FILENAME = "crazy-carls-brickhouse-tavern.wav"  # in same folder as this script
 STEP = 15                                       # volume step
 START_VOL = 50                                  # 0..100
 # --------------
@@ -24,7 +24,8 @@ def set_pygame_volume(pct):
 
 def get_audio_path():
     here = pathlib.Path(__file__).resolve().parent
-    return (here.parent / FILENAME).resolve()
+    #return (here.parent / FILENAME).resolve() #prevly wav in parent folder
+    return (here / FILENAME).resolve()  # Look in current directory instead of parent
 
 def main(stdscr):
     # lazy-import pygame after curses owns the TTY
@@ -37,7 +38,7 @@ def main(stdscr):
     audio_path = get_audio_path()
     if not audio_path.exists():
         print(f"File not found: {audio_path}")
-        print("Put the WAV in the parent folder of this script, or update FILENAME.")
+        print("Put the WAV file in the same folder as this script (Demos/Adaptive_audio/), or update FILENAME.")
         sys.exit(1)
 
     # init audio - use pygame.mixer.music for better looping
