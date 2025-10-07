@@ -6,7 +6,6 @@ import csv
 import json
 import logging
 import threading
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -71,6 +70,19 @@ class DataCollectionServer(ServerBringUp):
             target=self._process_commands,
             daemon=True
         )
+    
+    @staticmethod
+    def _binned_data_to_json_dict(binned_data: BinnedData) -> dict:
+        """Convert BinnedData to a JSON-serializable dictionary."""
+        return {
+            'bin_start_time': binned_data.bin_start_time,
+            'bin_end_time': binned_data.bin_end_time,
+            'phone_node_id': binned_data.phone_node_id,
+            'measurements': {
+                anchor_id: [vec.tolist() for vec in vectors]
+                for anchor_id, vectors in binned_data.measurements.items()
+            }
+        }
         
     def _setup_logging(self):
         """Setup custom logging configuration."""
@@ -180,7 +192,7 @@ class DataCollectionServer(ServerBringUp):
                 ground_truth[0], ground_truth[1], ground_truth[2],
                 pgo_measurement[0], pgo_measurement[1], pgo_measurement[2],
                 orientation,
-                json.dumps(asdict(latest_binned))
+                json.dumps(self._binned_data_to_json_dict(latest_binned))
             ])
             
         return pgo_measurement, latest_binned
