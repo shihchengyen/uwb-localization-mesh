@@ -7,7 +7,9 @@ A clean, simple visualization of UWB positioning data with:
 - Clear trajectory tracking
 - Minimal, focused UI
 """
-
+import matplotlib
+matplotlib.use("QtAgg")
+import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
