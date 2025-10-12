@@ -20,7 +20,10 @@ import paho.mqtt.client as mqtt
 import numpy as np
 
 # Import rotation matrices
-sys.path.append('/Users/hongyilin/projects/uwb-localization-mesh')
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # parent folder to path, but independent of laptop
+
 from demo_implementation.transform_to_global_vector import ANCHOR_R, Rz, Ry
 from demo_implementation.create_anchor_edges import ANCHORS
 
@@ -40,11 +43,11 @@ def on_connect(client, userdata, flags, rc):
     if rc == 0:
         topic = f"{MQTT_BASE_TOPIC}/anchor/+/vector"
         client.subscribe(topic, qos=0)
-        print(f"✅ Connected to MQTT broker")
-        print(f"📡 Subscribed to: {topic}")
+        print(f"[OK1] Connected to MQTT broker")
+        print(f"[OK2] Subscribed to: {topic}")
         print()
     else:
-        print(f"❌ Connection failed with code: {rc}")
+        print(f"[ERROR] Connection failed with code: {rc}")
 
 def on_message(client, userdata, msg):
     global total_messages
@@ -103,9 +106,9 @@ def on_message(client, userdata, msg):
         z_ok = 0 <= phone_position[2] <= 239
         
         if x_ok and y_ok and z_ok:
-            print(f"✅ REASONABLE - within room bounds")
+            print(f"[OK] REASONABLE - within room bounds")
         else:
-            print(f"❌ UNREASONABLE - outside room bounds!")
+            print(f"[ERROR] UNREASONABLE - outside room bounds!")
             if not x_ok:
                 print(f"   X out of range: {phone_position[0]:.2f} (should be 0-440)")
             if not y_ok:
@@ -116,7 +119,7 @@ def on_message(client, userdata, msg):
         print(f"\nTotal messages: {total_messages}")
         
     except Exception as e:
-        print(f"❌ Error processing message: {e}")
+        print(f"[ERROR] Error processing message: {e}")
         import traceback
         traceback.print_exc()
 
@@ -168,7 +171,8 @@ def main():
     # Create MQTT client
     client = mqtt.Client(
         client_id=MQTT_CLIENT_ID,
-        protocol=mqtt.MQTTv311
+        protocol=mqtt.MQTTv311,
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2
     )
     
     if MQTT_USERNAME and MQTT_PASSWORD:
@@ -181,7 +185,7 @@ def main():
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
         client.loop_forever()
     except Exception as e:
-        print(f"❌ Failed to connect: {e}")
+        print(f"[ERROR] Failed to connect: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

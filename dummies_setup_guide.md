@@ -71,6 +71,11 @@ uv sync
 ```bash
 # Install Mosquitto MQTT broker from: https://mosquitto.org/download/
 
+# Add to PATH environment variable
+$env:PATH += ";C:\Users\limji\.local\bin" #or whatever default path u installed uv in
+$env:PATH += ";C:\Program Files\mosquitto" #or whatever default path u installed mosquitto in 
+.venv\Scripts\activate
+
 # Install Python dependencies using UV (this uses uv.lock for exact versions)
 uv sync
 ```
@@ -94,6 +99,9 @@ sudo apt-get install -y python3-serial
 # Time sync (Do this before any sorta data collection / critical logging!)
 sudo apt-get install -y chrony
 sudo chronyd -q 'server pool.ntp.org iburst'
+
+# Activate the venv. for Python interpreter and packages to be available in your current shell session
+source .venv/bin/activate
 
 # Install Python dependencies using UV (this uses uv.lock for exact versions)
 uv sync
