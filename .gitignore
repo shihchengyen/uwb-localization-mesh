@@ -46,10 +46,7 @@ logs/
 test_output/
 
 #Data
-Data_collection/Data/datapoints.csv
-Data_collection/Data/variance.csv
 Data/datapoints.csv
 Data/variance.csv
-demo_implementation/__pycache__/create_anchor_edges.cpython-311.pyc
 demo_implementation/__pycache__/create_anchor_edges.cpython-311.pyc
 demo_implementation/__pycache__/transform_to_global_vector.cpython-311.pyc

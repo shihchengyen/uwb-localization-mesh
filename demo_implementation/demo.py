@@ -34,7 +34,7 @@ from create_anchor_edges import ANCHORS, SQUARE_CM, NX, NY
 
 # MQTT Configuration (from uwb_pgo.py)
 MQTT_BROKER = "192.168.99.3"
-MQTT_PORT = 1883
+MQTT_PORT = 1884
 MQTT_USERNAME = "laptop"
 MQTT_PASSWORD = "laptop"
 MQTT_CLIENT_ID = "pgo_live_demo"

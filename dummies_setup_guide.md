@@ -117,6 +117,8 @@ On your laptop, in the project directory:
 
 # Start MQTT broker
 mosquitto -c mosquitto.conf
+# or
+mosquitto -v 
 ```
 
 You should see: `mosquitto version 2.x.x running`
@@ -135,7 +137,7 @@ uv run python Server_bring_up.py --broker localhost
 
 You should see logs like:
 ```json
-{"timestamp": "2025-10-08 10:30:00", "level": "INFO", "message": {"event": "server_config", "broker": "localhost", "port": 1883}}
+{"timestamp": "2025-10-08 10:30:00", "level": "INFO", "message": {"event": "server_config", "broker": "localhost", "port": 1884}}
 ```
 
 ---
@@ -163,7 +165,7 @@ You should see:
 
 Configuration:
   Anchor ID:     0
-  MQTT Broker:   192.168.68.66:1883
+  MQTT Broker:   192.168.68.66:1884
   Serial Port:   /dev/ttyUSB0
   Baud Rate:     3000000
   Client ID:     uwb_anchor_rpi0
@@ -294,7 +296,7 @@ Current position: [123.45 234.56  50.00]
 - Ensure phone is in range and UWB is enabled
 
 ### Raspberry Pi can't connect to MQTT
-- Ensure firewall allows port 1883: `sudo ufw allow 1883`
+- Ensure firewall allows port 1884: `sudo ufw allow 1884`
 - Check network connectivity between RPi and laptop
 
 ---
@@ -329,7 +331,7 @@ Once everything is running, you can:
 **On Laptop Terminal 1 (MQTT):**
 ```bash
 cd uwb-localization-mesh
-echo "listener 1883
+echo "listener 1884
 allow_anonymous true" > mosquitto.conf
 mosquitto -c mosquitto.conf
 ```

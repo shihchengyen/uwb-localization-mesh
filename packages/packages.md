@@ -49,7 +49,7 @@ from localization_algos.binning import SlidingWindowBinner
 from localization_algos.pgo import PGOSolver
 
 # Configure MQTT
-mqtt_config = MQTTConfig(broker="localhost", port=1883)
+mqtt_config = MQTTConfig(broker="localhost", port=1884)
 
 # Create server components
 server = UWBMQTTServer(config=mqtt_config)
@@ -63,7 +63,7 @@ server.start()
 from uwb_mqtt_client import UWBMqttClient, MQTTConfig
 
 # Configure client
-mqtt_config = MQTTConfig(broker="server_ip", port=1883)
+mqtt_config = MQTTConfig(broker="server_ip", port=1884)
 client = UWBMqttClient(config=mqtt_config, phone_node_id=0)
 
 # Connect and publish

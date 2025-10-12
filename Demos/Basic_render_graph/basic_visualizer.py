@@ -236,7 +236,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='UWB Position Visualizer')
     parser.add_argument('--broker', type=str, default='localhost',
                       help='MQTT broker IP address')
-    parser.add_argument('--port', type=int, default=1883,
+    parser.add_argument('--port', type=int, default=1884,
                       help='MQTT broker port')
     parser.add_argument('--history', type=int, default=100,
                       help='Number of historical positions to show')

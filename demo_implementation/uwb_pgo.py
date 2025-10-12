@@ -14,7 +14,7 @@ import paho.mqtt.client as mqtt
 
 # ====== mqtt configs ======
 MQTT_BROKER = "192.168.99.3"
-MQTT_PORT = 1883
+MQTT_PORT = 1884
 MQTT_USERNAME = "laptop"
 MQTT_PASSWORD = "laptop"
 MQTT_CLIENT_ID = "uwb_pgo_subscriber"
