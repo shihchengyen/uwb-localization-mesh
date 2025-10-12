@@ -153,10 +153,11 @@ Environment Variables:
             anchor_id=anchor_id
         )
 
-    print("╔══════════════════════════════════════════════════════════════╗")
-    print(f"║                  {anchor_info['name']}                      ║")
-    print(f"║              {anchor_info['description']}                  ║")
-    print("╚══════════════════════════════════════════════════════════════╝")
+    print("=" * 60)
+    print(f"Anchor {anchor_id}: {anchor_info['name']}")
+    print(f"Description: {anchor_info['description']}")
+    print("=" * 60)
+    print()
     print()
     print("Configuration:")
     print(f"  Anchor ID:     {anchor_id}")

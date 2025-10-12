@@ -14,7 +14,8 @@ class MQTTConfig:
     password: Optional[str] = None
     client_id: str = "uwb_mqtt_client"
     qos: int = 0  # Changed to QoS 0 for fire-and-forget (no acks needed)
-    keepalive: int = 10  # Reduced keepalive to detect disconnects faster
+    # keepalive: int = 10  # Reduced keepalive to detect disconnects faster
+    keepalive: int = 60  # Increased keepalive for better stability when testing with hotspot 
 
     # Topic patterns
     base_topic: str = "uwb"
