@@ -29,7 +29,7 @@ from demo_implementation.create_anchor_edges import ANCHORS
 
 # MQTT Configuration
 MQTT_BROKER = "localhost"  # Changed from 192.168.99.3 to localhost
-MQTT_PORT = 1883
+MQTT_PORT = 1884
 MQTT_USERNAME = "laptop"
 MQTT_PASSWORD = "laptop"
 MQTT_CLIENT_ID = "raw_data_inspector"
@@ -39,7 +39,7 @@ MQTT_BASE_TOPIC = "uwb"
 recent_readings = defaultdict(lambda: deque(maxlen=10))
 total_messages = 0
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         topic = f"{MQTT_BASE_TOPIC}/anchor/+/vector"
         client.subscribe(topic, qos=0)

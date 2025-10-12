@@ -30,7 +30,7 @@ BAUD        = 3_000_000
 
 # MQTT Config
 MQTT_BROKER = "localhost"  # Change to your MQTT broker IP/hostname
-MQTT_PORT = 1883
+MQTT_PORT = 1884
 MQTT_USERNAME = None  # Set if authentication required
 MQTT_PASSWORD = None  # Set if authentication required
 

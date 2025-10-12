@@ -271,6 +271,17 @@ class DataCollectionServer(ServerBringUp):
         print("  logs - Show recent logs")
         print("  quit")
         
+        # Check if stdin is available (interactive mode)
+        import sys
+        if sys.stdin.isatty():
+            # Interactive mode - can use input()
+            self._interactive_mode()
+        else:
+            # Non-interactive mode - just keep running
+            self._background_mode()
+    
+    def _interactive_mode(self):
+        """Interactive command processing."""
         while not self._stop_event.is_set():
             try:
                 cmd = input("\nEnter command: ").strip()
@@ -287,60 +298,79 @@ class DataCollectionServer(ServerBringUp):
                 if not parts:
                     continue
                     
-                if parts[0] == "collect_datapoint":
-                    if len(parts) != 5:
-                        print("Usage: collect_datapoint <x> <y> <z> <orientation>")
-                        continue
-                        
-                    try:
-                        x, y, z = map(float, parts[1:4])
-                        ground_truth = np.array([x, y, z])
-                        orientation = parts[4]
-                        
-                        pos, data = self.collect_datapoint(
-                            ground_truth,
-                            orientation
-                        )
-                        print(f"\nDatapoint collected!")
-                        print(f"Ground truth: ({x}, {y}, {z})")
-                        print(f"PGO position: ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
-                        
-                    except Exception as e:
-                        print(f"Error collecting datapoint: {e}")
-                        
-                elif parts[0] == "variance":
-                    if len(parts) not in (5, 6):
-                        print("Usage: variance <x> <y> <z> <orientation> [window_seconds=10]")
-                        continue
-                        
-                    try:
-                        x, y, z = map(float, parts[1:4])
-                        ground_truth = np.array([x, y, z])
-                        orientation = parts[4]
-                        window = float(parts[5]) if len(parts) == 6 else 10.0
-                        
-                        print(f"\nCollecting variance over {window} seconds...")
-                        pos, stats = self.collect_variance(
-                            ground_truth,
-                            orientation,
-                            window
-                        )
-                        
-                        print("\nVariance collection complete!")
-                        print(f"Ground truth: ({x}, {y}, {z})")
-                        print(f"Final position: ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
-                        print("\nStatistics:")
-                        for k, v in stats.items():
-                            print(f"  {k}: {v:.6f}")
-                            
-                    except Exception as e:
-                        print(f"Error collecting variance: {e}")
-                        
-                else:
-                    print("Unknown command")
+                self._execute_command(parts)
                     
+            except EOFError:
+                print("\nSwitching to background mode...")
+                self._background_mode()
+                break
             except Exception as e:
                 print(f"Error processing command: {e}")
+    
+    def _background_mode(self):
+        """Background mode - just keep running and log status."""
+        import time
+        while not self._stop_event.is_set():
+            try:
+                time.sleep(5)  # Check every 5 seconds
+                if self.user_position is not None:
+                    print(f"\r[STATUS] Position: ({self.user_position[0]:.1f}, {self.user_position[1]:.1f}, {self.user_position[2]:.1f}) - Ready for data collection", end="", flush=True)
+            except Exception as e:
+                print(f"\nError in background mode: {e}")
+    
+    def _execute_command(self, parts):
+        """Execute a command given its parts."""
+        if parts[0] == "collect_datapoint":
+            if len(parts) != 5:
+                print("Usage: collect_datapoint <x> <y> <z> <orientation>")
+                return
+                
+            try:
+                x, y, z = map(float, parts[1:4])
+                ground_truth = np.array([x, y, z])
+                orientation = parts[4]
+                
+                pos, data = self.collect_datapoint(
+                    ground_truth,
+                    orientation
+                )
+                print(f"\nDatapoint collected!")
+                print(f"Ground truth: ({x}, {y}, {z})")
+                print(f"PGO position: ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
+                
+            except Exception as e:
+                print(f"Error collecting datapoint: {e}")
+                
+        elif parts[0] == "variance":
+            if len(parts) not in (5, 6):
+                print("Usage: variance <x> <y> <z> <orientation> [window_seconds=10]")
+                return
+                
+            try:
+                x, y, z = map(float, parts[1:4])
+                ground_truth = np.array([x, y, z])
+                orientation = parts[4]
+                window = float(parts[5]) if len(parts) == 6 else 10.0
+                
+                print(f"\nCollecting variance over {window} seconds...")
+                pos, stats = self.collect_variance(
+                    ground_truth,
+                    orientation,
+                    window
+                )
+                
+                print("\nVariance collection complete!")
+                print(f"Ground truth: ({x}, {y}, {z})")
+                print(f"Final position: ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
+                print("\nStatistics:")
+                for k, v in stats.items():
+                    print(f"  {k}: {v:.6f}")
+                    
+            except Exception as e:
+                print(f"Error collecting variance: {e}")
+                
+        else:
+            print("Unknown command")
 
     def start(self):
         """Start the server and processing threads."""
@@ -354,7 +384,7 @@ if __name__ == "__main__":
     # Example usage
     mqtt_config = MQTTConfig(
         broker="localhost",
-        port=1883
+        port=1884
     )
     
     server = DataCollectionServer(

@@ -225,7 +225,7 @@ First, start the MQTT broker on your laptop:
 
 ```bash
 # Create mosquitto.conf if not exists
-echo "listener 1883
+echo "listener 1884
 allow_anonymous true" > mosquitto.conf
 
 # Start Mosquitto with this config
@@ -239,7 +239,7 @@ Start the server with your laptop's IP:
 # Configure MQTT with your laptop's IP
 mqtt_config = MQTTConfig(
     broker="192.168.68.66",  # Replace with your laptop's IP
-    port=1883
+    port=1884
 )
 
 # Start server
@@ -276,6 +276,6 @@ Common log messages:
 ### 4. Troubleshooting
 - If anchors can't connect, verify:
   1. Mosquitto is running (`ps aux | grep mosquitto`)
-  2. Port 1883 is open (`netstat -an | grep 1883`)
+  2. Port 1884 is open (`netstat -an | grep 1884`)
   3. Laptop's IP is correct and accessible
   4. No firewall blocking connections

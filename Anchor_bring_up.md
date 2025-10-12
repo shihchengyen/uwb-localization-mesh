@@ -53,7 +53,7 @@ sudo apt-get install mosquitto mosquitto-clients
 2. Create a custom mosquitto.conf:
 ```bash
 # Create mosquitto.conf in your project directory
-echo "listener 1883
+echo "listener 1884
 allow_anonymous true" > mosquitto.conf
 
 # Start Mosquitto with this config
@@ -119,7 +119,7 @@ You should see output like:
 
 Configuration:
   Anchor ID:     0
-  MQTT Broker:   192.168.1.100:1883
+  MQTT Broker:   192.168.1.100:1884
   Serial Port:   /dev/ttyUSB0
   Baud Rate:     3000000
   Client ID:     uwb_anchor_rpi0
@@ -188,8 +188,8 @@ Then you only need to set `MQTT_BROKER` and the script will auto-detect the anch
 **1. "Connection refused" to MQTT broker**
 - Ensure Mosquitto is running on laptop with correct config
 - Verify laptop's IP is accessible from RPi (`ping <laptop-ip>`)
-- Check no firewall is blocking port 1883
-- Verify mosquitto.conf has `listener 1883` and `allow_anonymous true`
+- Check no firewall is blocking port 1884
+- Verify mosquitto.conf has `listener 1884` and `allow_anonymous true`
 
 **2. "Clock synchronization issues"**
 - Ensure all devices are time-synced (see Prerequisites section)

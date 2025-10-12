@@ -73,7 +73,7 @@ def create_mqtt_config(broker_ip=None):
 
     return MQTTConfig(
         broker=broker,
-        port=1883,
+        port=1884,
         base_topic="uwb",
         client_id=f"uwb_anchor_{socket.gethostname()}"
     )

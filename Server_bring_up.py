@@ -267,7 +267,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='UWB Server')
     parser.add_argument('--broker', type=str, default='localhost',
                       help='MQTT broker IP address')
-    parser.add_argument('--port', type=int, default=1883,
+    parser.add_argument('--port', type=int, default=1884,
                       help='MQTT broker port')
     args = parser.parse_args()
     

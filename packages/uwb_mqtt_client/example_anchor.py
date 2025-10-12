@@ -27,7 +27,7 @@ def main():
                        help='Anchor ID (0-3)')
     parser.add_argument('--broker', type=str, default='localhost',
                        help='MQTT broker hostname/IP')
-    parser.add_argument('--port', type=int, default=1883,
+    parser.add_argument('--port', type=int, default=1884,
                        help='MQTT broker port')
     parser.add_argument('--serial-port', type=str, default='/dev/ttyUSB0',
                        help='Serial port for UWB hardware')

@@ -66,7 +66,7 @@ Central ingest + processing + outputs for demos.
 **Run order (base case):**
 ```bash
 # 1) Start MQTT broker on laptop
-echo "listener 1883
+echo "listener 1884
 allow_anonymous true" > mosquitto.conf
 mosquitto -c mosquitto.conf
 
