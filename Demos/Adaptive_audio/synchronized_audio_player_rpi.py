@@ -33,7 +33,7 @@ class RPiAudioPlayer:
         self.rpi_id = rpi_id
         self.wav_file = wav_file
         self.broker_ip = broker_ip
-        self.current_volume = 20  # Start at 20%
+        self.current_volume = 70  # Start at 70%
         self.is_playing = False
         self.audio_ready = False
         
@@ -107,7 +107,7 @@ class RPiAudioPlayer:
             print(f"❌ Failed to connect to MQTT broker: {e}")
             sys.exit(1)
     
-    def on_connect(self, client, userdata, flags, rc):
+    def on_connect(self, client, userdata, flags, rc, properties=None):
         """MQTT connection callback."""
         if rc == 0:
             print("✅ MQTT Connected successfully")
