@@ -218,11 +218,29 @@ The server tracks several metrics:
    - Message counts
    - Queue sizes
 
-## Usage Example
+## Setup & Usage
+
+### 1. Start MQTT Broker
+First, start the MQTT broker on your laptop:
+
+```bash
+# Create mosquitto.conf if not exists
+echo "listener 1884
+allow_anonymous true" > mosquitto.conf
+
+# Start Mosquitto with this config
+mosquitto -c mosquitto.conf
+```
+
+### 2. Start Server
+Start the server with your laptop's IP:
 
 ```python
-# Configure MQTT
-mqtt_config = MQTTConfig(broker="localhost", port=1884)
+# Configure MQTT with your laptop's IP
+mqtt_config = MQTTConfig(
+    broker="192.168.68.66",  # Replace with your laptop's IP, or tbh it doesnt matter cuz we add the laptop ip as an argument when calling the file
+    port=1884
+)
 
 # Start server
 server = ServerBringUp(
@@ -232,9 +250,32 @@ server = ServerBringUp(
 
 try:
     server.start()
-    # Server runs until interrupted
+    print("Server started. Waiting for anchor connections...")
     while True:
+        if server.user_position is not None:
+            print(f"Current position: {server.user_position}")
         time.sleep(1)
 except KeyboardInterrupt:
     server.stop()
 ```
+
+### 3. Verify Operation
+Monitor the server logs for:
+- MQTT connection status
+- Anchor connections
+- Measurement processing
+- Position updates
+
+Common log messages:
+```json
+{"event": "server_initialized", "n_anchors": 4}
+{"event": "mqtt_connected", "topic": "uwb/anchor/+/vector"}
+{"event": "position_updated", "position": [x, y, z]}
+```
+
+### 4. Troubleshooting
+- If anchors can't connect, verify:
+  1. Mosquitto is running (`ps aux | grep mosquitto`)
+  2. Port 1884 is open (`netstat -an | grep 1884`)
+  3. Laptop's IP is correct and accessible
+  4. No firewall blocking connections

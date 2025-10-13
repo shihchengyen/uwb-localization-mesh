@@ -1,4 +1,12 @@
 import numpy as np
+import os
+import sys
+
+# Add current directory to path for relative imports (bc this script is in /Data_collection)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 from create_anchor_edges import ANCHORS
 
 # transformation from local anchor coordinates to global XYZ coordinates

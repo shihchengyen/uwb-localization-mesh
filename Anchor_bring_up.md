@@ -38,39 +38,70 @@ pip install paho-mqtt numpy
 sudo apt-get install -y python3-serial
 ```
 
-### 3. MQTT Broker
-Set up an MQTT broker (Mosquitto) accessible from all RPis:
+### 3. MQTT Broker Setup
+
+#### On the Server (Laptop):
+1. Install Mosquitto:
 ```bash
+# macOS
+brew install mosquitto
+
+# Linux
 sudo apt-get install mosquitto mosquitto-clients
-sudo systemctl start mosquitto
+```
+
+2. Create a custom mosquitto.conf:
+```bash
+# Create mosquitto.conf in your project directory
+echo "listener 1884
+allow_anonymous true" > mosquitto.conf
+
+# Start Mosquitto with this config
+mosquitto -c mosquitto.conf
+```
+
+3. Verify MQTT broker is running:
+```bash
+# Subscribe to test topic
+mosquitto_sub -h localhost -t "test"
 ```
 
 ## Quick Start
 
 ### Step 1: Configure Each RPi
 
+1. First, ensure your laptop's IP address is accessible from all RPis:
+```bash
+# On each RPi, test connection to laptop
+ping <laptop-ip>  # Example: ping 192.168.68.66
+```
+
+2. Configure each RPi:
+
 **On RPi 0 (Anchor 0):**
 ```bash
+# Either use command line argument
+python Anchor_bring_up.py --anchor-id 0 --broker <laptop-ip>
+
+# Or use environment variables
 export ANCHOR_ID=0
-export MQTT_BROKER="192.168.68.63"  # Your MQTT broker IP
+export MQTT_BROKER="<laptop-ip>"  # Example: 192.168.68.66
+python Anchor_bring_up.py
 ```
 
 **On RPi 1 (Anchor 1):**
 ```bash
-export ANCHOR_ID=1
-export MQTT_BROKER="192.168.68.63"
+python Anchor_bring_up.py --anchor-id 1 --broker <laptop-ip>
 ```
 
 **On RPi 2 (Anchor 2):**
 ```bash
-export ANCHOR_ID=2
-export MQTT_BROKER="192.168.68.63"
+python Anchor_bring_up.py --anchor-id 2 --broker <laptop-ip>
 ```
 
 **On RPi 3 (Anchor 3):**
 ```bash
-export ANCHOR_ID=3
-export MQTT_BROKER="192.168.68.63"
+python Anchor_bring_up.py --anchor-id 3 --broker <laptop-ip>
 ```
 
 ### Step 2: Run on Each RPi
@@ -124,11 +155,11 @@ Options:
 
 ## Auto-Detection Features
 
-The script automatically detects the anchor ID using:
+The script automatically detects the anchor ID using the following priority order:
 
-1. **Environment variable** `ANCHOR_ID`
-2. **Hostname detection** (looks for "anchor0", "rpi0", etc. in hostname)
-3. **Command line argument** `--anchor-id`
+1. **Command line argument** `--anchor-id` (highest priority)
+2. **Environment variable** `ANCHOR_ID`
+3. **Hostname detection** (looks for "anchor0", "anchor1", "anchor2", "anchor3" or "rpi0", "rpi1", "rpi2", "rpi3" in hostname)
 
 ### Recommended: Hostname-Based Setup
 
@@ -154,15 +185,29 @@ Then you only need to set `MQTT_BROKER` and the script will auto-detect the anch
 
 ### Common Issues
 
-**1. "Clock synchronization issues"**
+**1. "Connection refused" to MQTT broker**
+- Ensure Mosquitto is running on laptop with correct config
+- Verify laptop's IP is accessible from RPi (`ping <laptop-ip>`)
+- Check no firewall is blocking port 1884
+- Verify mosquitto.conf has `listener 1884` and `allow_anonymous true`
 
-**2. "Could not determine anchor ID"**
-- Ensure MQTT broker is running and accessible
+**2. "Clock synchronization issues"**
+- Ensure all devices are time-synced (see Prerequisites section)
 
-**3. "Failed to start UWB hardware interface"**
+**3. "Could not determine anchor ID"**
+- Explicitly provide anchor ID via --anchor-id argument
+- Or set ANCHOR_ID environment variable
+- Or use hostname-based detection (see Hostname Setup section)
+
+**4. "Failed to start UWB hardware interface"**
 - Check USB serial device is connected: `ls /dev/ttyUSB*`
 - Verify serial port in `SERIAL_PORT`
 - Check device permissions: `sudo usermod -a -G dialout $USER`
+
+**5. "MQTT disconnects frequently"**
+- Check network stability between RPi and laptop
+- Ensure laptop's IP hasn't changed
+- Verify Mosquitto is still running on laptop
 
 ### Testing
 

@@ -46,11 +46,12 @@ class ServerBringUp:
         """Initialize the server with configuration."""
         
         # Ground truth anchor positions (cm)
+        # Anchors are mounted at 239 cm (2.39m) height
         self.true_nodes = {
-            0: np.array([440, 550, 0]),  # top-right
-            1: np.array([0, 550, 0]),    # top-left
-            2: np.array([440, 0, 0]),    # bottom-right
-            3: np.array([0, 0, 0])       # bottom-left (origin)
+            0: np.array([440, 550, 239]),  # top-right
+            1: np.array([0, 550, 239]),    # top-left
+            2: np.array([440, 0, 239]),    # bottom-right
+            3: np.array([0, 0, 239])       # bottom-left (origin in XY, but at sensor height in Z)
         }
         
         # Working copy of nodes that can be jittered (jittering temporarily disabled)
@@ -261,11 +262,26 @@ class ServerBringUp:
             time.sleep(0.01)
 
 if __name__ == "__main__":
-    # Example usage
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='UWB Server')
+    parser.add_argument('--broker', type=str, default='localhost',
+                      help='MQTT broker IP address')
+    parser.add_argument('--port', type=int, default=1884,
+                      help='MQTT broker port')
+    args = parser.parse_args()
+    
+    # Configure MQTT with command line arguments
     mqtt_config = MQTTConfig(
-        broker="localhost",
-        port=1884
+        broker=args.broker,
+        port=args.port
     )
+    
+    logger.info(json.dumps({
+        "event": "server_config",
+        "broker": args.broker,
+        "port": args.port
+    }))
     
     # Start server (jitter temporarily disabled)
     server = ServerBringUp(

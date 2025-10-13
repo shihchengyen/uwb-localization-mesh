@@ -56,10 +56,18 @@ class UWBMQTTClient:
         # Set callbacks
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
+        self._client.on_publish = self._on_publish
+
+        # Enable automatic reconnect
+        self._client.reconnect_delay_set(min_delay=1, max_delay=5)
 
         # Set auth if provided
         if config.username and config.password:
             self._client.username_pw_set(config.username, config.password)
+            
+        # Connection status
+        self._connected = False
+        self._connection_lock = threading.Lock()
 
         # Reconnection state
         self._reconnect_delay = self.config.reconnect_delay_min
@@ -175,19 +183,32 @@ class UWBMQTTClient:
     def _on_connect(self, client: mqtt.Client, userdata: Dict, flags: Dict, rc: int):
         """Handle successful connection."""
         if rc == 0:
-            # Reset reconnection delay on successful connect
-            self._reconnect_delay = self.config.reconnect_delay_min
+            with self._connection_lock:
+                self._connected = True
+                self._reconnect_delay = self.config.reconnect_delay_min
             
             logger.info(json.dumps({
                 "event": "mqtt_connected",
-                "phone_node_id": self.phone_node_id
+                "phone_node_id": self.phone_node_id,
+                "qos": self.config.qos
             }))
         else:
+            with self._connection_lock:
+                self._connected = False
+            
             logger.error(json.dumps({
                 "event": "mqtt_connect_failed",
-                "rc": rc
+                "rc": rc,
+                "reason": mqtt.connack_string(rc)
             }))
             
+    def _on_publish(self, client: mqtt.Client, userdata: Dict, mid: int):
+        """Handle successful publish."""
+        logger.debug(json.dumps({
+            "event": "message_published",
+            "message_id": mid
+        }))
+    
     def _on_disconnect(self, client: mqtt.Client, userdata: Dict, rc: int):
         """Handle disconnection with exponential backoff."""
         logger.warning(json.dumps({

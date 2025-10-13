@@ -65,18 +65,29 @@ Central ingest + processing + outputs for demos.
 
 **Run order (base case):**
 ```bash
-# 1) Start server
-python Server_bring_up.py
+# 1) Start MQTT broker on laptop
+echo "listener 1884
+allow_anonymous true" > mosquitto.conf
+mosquitto -c mosquitto.conf
 
-# 2) Start one or more clients
-python Client_bring_up.py --node-id 0
-python Client_bring_up.py --node-id 1
+# 2) Start server (in new terminal)
+# Replace with your laptop's IP
+python Server_bring_up.py --broker 192.168.68.66
 
-# 3) Run a demo
+# 3) Start anchors on RPis (in separate terminals)
+# Replace with your laptop's IP
+python Anchor_bring_up.py --anchor-id 0 --broker 192.168.68.66
+python Anchor_bring_up.py --anchor-id 1 --broker 192.168.68.66
+python Anchor_bring_up.py --anchor-id 2 --broker 192.168.68.66
+python Anchor_bring_up.py --anchor-id 3 --broker 192.168.68.66
+
+# 4) Run a demo (in new terminal)
 python Demos/Basic_render_graph/run.py
 # or
 python Demos/Follow_me_audio/run.py
 ```
+
+> **Important**: Always start the MQTT broker first, then server, then anchors.
 
 > If you use `uv`, the same commands work with `uv run …`
 

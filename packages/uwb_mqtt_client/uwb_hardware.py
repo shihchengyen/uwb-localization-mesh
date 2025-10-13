@@ -183,9 +183,12 @@ class UWBHardwareInterface:
         # Convert spherical to Cartesian (local frame only)
         v_local = self._r_local_from_az_el(r, az, el)
 
+        # Use the configured anchor_id instead of the parsed one from serial data (like TWR[0] makes the topic uwb/anchor/0/vector even for rpi1)
+        configured_anchor_id = self.config.anchor_id
+
         # Create measurement objects
         raw_measurement = RawUWBMeasurement(
-            anchor_id=anchor_id,
+            anchor_id=configured_anchor_id,
             distance_m=r,
             azimuth_deg=az,
             elevation_deg=el,
@@ -193,7 +196,7 @@ class UWBHardwareInterface:
         )
 
         processed_measurement = ProcessedUWBMeasurement(
-            anchor_id=anchor_id,
+            anchor_id=configured_anchor_id,
             timestamp_ns=time.time_ns(),
             vector_local=v_local,
             raw=raw_measurement
@@ -218,6 +221,8 @@ class UWBHardwareInterface:
           +az = right, -az = left; 0 = forward (board normal)
           +el = down,  -el = up;   0 = horizontal
           local axes: x=forward, y=left, z=up
+          
+        Note: Despite parameter name, dist_m is already in cm from sensor!
         """
         th = self._deg2rad(az_deg)
         ph = self._deg2rad(el_deg)
@@ -228,4 +233,4 @@ class UWBHardwareInterface:
         y = -dist_m * cph * sth   # minus because +az is to the RIGHT
         z = -dist_m * sph         # minus because +el is DOWN
 
-        return (x * 100, y * 100, z * 100)  # Convert to cm
+        return (x, y, z)  # Already in cm - no conversion needed!
