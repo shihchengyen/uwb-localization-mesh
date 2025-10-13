@@ -20,8 +20,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'packages'))
 from uwb_mqtt_client.config import MQTTConfig
 
 # ====== NETWORK CONFIGURATION ======
-DEFAULT_BROKER_IP = "192.168.99.3"  # Change this to your MQTT broker IP
-DEFAULT_BROKER_PORT = 1883
+# DEFAULT_BROKER_IP = "192.168.1.100"  # Your laptop's IP address
+DEFAULT_BROKER_IP = "172.20.20.3"  # MSI's ip addr on iphone hotspot
+DEFAULT_BROKER_PORT = 1884
 DEFAULT_USERNAME = "laptop"
 DEFAULT_PASSWORD = "laptop"
 # ====================================

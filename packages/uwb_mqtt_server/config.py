@@ -9,7 +9,7 @@ from typing import Optional
 class MQTTConfig:
     """MQTT broker configuration."""
     broker: str
-    port: int = 1883
+    port: int = 1884
     username: Optional[str] = None
     password: Optional[str] = None
     client_id: str = "uwb_mqtt_server"

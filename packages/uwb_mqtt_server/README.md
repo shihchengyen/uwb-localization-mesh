@@ -26,7 +26,7 @@ def handle_measurement(measurement):
 # Configure server
 config = MQTTConfig(
     broker="localhost",
-    port=1883,
+    port=1884,
     base_topic="uwb"
 )
 

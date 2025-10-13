@@ -222,7 +222,7 @@ The server tracks several metrics:
 
 ```python
 # Configure MQTT
-mqtt_config = MQTTConfig(broker="localhost", port=1883)
+mqtt_config = MQTTConfig(broker="localhost", port=1884)
 
 # Start server
 server = ServerBringUp(

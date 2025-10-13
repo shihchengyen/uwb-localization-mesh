@@ -264,7 +264,7 @@ if __name__ == "__main__":
     # Example usage
     mqtt_config = MQTTConfig(
         broker="localhost",
-        port=1883
+        port=1884
     )
     
     # Start server (jitter temporarily disabled)

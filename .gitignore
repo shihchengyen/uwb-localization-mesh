@@ -44,3 +44,5 @@ htmlcov/
 *.log
 logs/
 test_output/
+Data/variance.csv
+Data/datapoints.csv

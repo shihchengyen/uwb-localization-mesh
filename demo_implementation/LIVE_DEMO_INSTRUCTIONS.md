@@ -64,7 +64,7 @@ python demo.py
 ### **MQTT Settings** (in `demo.py`):
 ```python
 MQTT_BROKER = "192.168.99.3"      # Your laptop IP
-MQTT_PORT = 1883
+MQTT_PORT = 1884
 MQTT_USERNAME = "laptop"
 MQTT_PASSWORD = "laptop"
 MQTT_BASE_TOPIC = "uwb"

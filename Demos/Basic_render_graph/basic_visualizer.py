@@ -220,7 +220,7 @@ if __name__ == "__main__":
     # Configure MQTT
     mqtt_config = MQTTConfig(
         broker="localhost",  # Change to your MQTT broker
-        port=1883
+        port=1884
     )
     
     # Create and start visualizer

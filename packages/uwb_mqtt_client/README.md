@@ -55,7 +55,7 @@ from uwb_mqtt_client import UWBMQTTClient, MQTTConfig, UWBConfig
 # Configure MQTT
 mqtt_config = MQTTConfig(
     broker="192.168.1.100",
-    port=1883,
+    port=1884,
     base_topic="uwb"
 )
 
@@ -96,7 +96,7 @@ import numpy as np
 # Configure client
 config = MQTTConfig(
     broker="192.168.1.100",
-    port=1883,
+    port=1884,
     base_topic="uwb"
 )
 
@@ -129,7 +129,7 @@ UWB Hardware → Serial Parsing → Local Vector Conversion → MQTT Publish
 
 ### MQTTConfig
 - `broker`: MQTT broker hostname/IP
-- `port`: MQTT broker port (default: 1883)
+- `port`: MQTT broker port (default: 1884)
 - `username`/`password`: Authentication (optional)
 - `base_topic`: Base topic (default: "uwb")
 - `qos`: Quality of Service (default: 1)

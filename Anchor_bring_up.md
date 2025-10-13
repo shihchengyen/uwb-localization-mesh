@@ -88,7 +88,7 @@ You should see output like:
 
 Configuration:
   Anchor ID:     0
-  MQTT Broker:   192.168.1.100:1883
+  MQTT Broker:   192.168.1.100:1884
   Serial Port:   /dev/ttyUSB0
   Baud Rate:     3000000
   Client ID:     uwb_anchor_rpi0

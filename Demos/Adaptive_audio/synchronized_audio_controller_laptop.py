@@ -18,8 +18,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'packages'))
 from uwb_mqtt_server.config import MQTTConfig
 
 # ====== NETWORK CONFIGURATION ======
-DEFAULT_BROKER_IP = "192.168.99.3"  # Change this to your MQTT broker IP
-DEFAULT_BROKER_PORT = 1883
+# DEFAULT_BROKER_IP = "192.168.1.100"  # Your laptop's IP address
+DEFAULT_BROKER_IP = "172.20.20.3"  # MSI's ip addr on iphone hotspot
+DEFAULT_BROKER_PORT = 1884
 DEFAULT_USERNAME = "laptop"
 DEFAULT_PASSWORD = "laptop"
 # ====================================
@@ -173,7 +174,7 @@ def main():
     
     parser = argparse.ArgumentParser(description="Laptop Audio Controller")
     parser.add_argument("--broker", default=DEFAULT_BROKER_IP, help="MQTT broker IP")
-    parser.add_argument("--port", type=int, default=1883, help="MQTT broker port")
+    parser.add_argument("--port", type=int, default=1884, help="MQTT broker port")
     parser.add_argument("--delay", type=float, default=0.5, help="Target execution delay in seconds")
     
     args = parser.parse_args()

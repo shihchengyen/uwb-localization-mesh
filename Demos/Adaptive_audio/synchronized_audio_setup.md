@@ -41,20 +41,22 @@ RPi 1 (Left Speaker)    RPi 2 (Right Speaker)
 
 **Edit both scripts to match your network:**
 
-**In `audio_controller_laptop.py` (lines 21-24):**
+**In `synchronized_audio_controller_laptop.py` (lines 21-24):**
 ```python
 # ====== NETWORK CONFIGURATION ======
-DEFAULT_BROKER_IP = "192.168.1.100"  # Your laptop's IP address
-DEFAULT_BROKER_PORT = 1883
+# DEFAULT_BROKER_IP = "192.168.1.100"  # Your laptop's IP address
+DEFAULT_BROKER_IP = "172.20.20.3"  # MSI's ip addr on iphone hotspot
+DEFAULT_BROKER_PORT = 1884
 DEFAULT_USERNAME = "laptop"
 DEFAULT_PASSWORD = "laptop"
 ```
 
-**In `audio_player_rpi.py` (lines 23-26):**
+**In `synchronized_audio_player_rpi.py` (lines 23-26):**
 ```python
 # ====== NETWORK CONFIGURATION ======
-DEFAULT_BROKER_IP = "192.168.1.100"  # Your laptop's IP address
-DEFAULT_BROKER_PORT = 1883
+# DEFAULT_BROKER_IP = "192.168.1.100"  # Your laptop's IP address
+DEFAULT_BROKER_IP = "172.20.20.3"  # MSI's ip addr on iphone hotspot
+DEFAULT_BROKER_PORT = 1884
 DEFAULT_USERNAME = "laptop"
 DEFAULT_PASSWORD = "laptop"
 ```
@@ -65,16 +67,16 @@ DEFAULT_PASSWORD = "laptop"
 
 1. **Install dependencies:**
    ```bash
-   pip install paho-mqtt pygame
+   uv add pyserial pygame
    ```
 
 2. **Start MQTT broker:**
    ```bash
    # Option A: If mosquitto is installed
-   mosquitto -p 1883
+   mosquitto -p 1884
    
    # Option B: If using Docker
-   docker run -it -p 1883:1883 eclipse-mosquitto
+   docker run -it -p 1884:1884 eclipse-mosquitto
    
    # Option C: If using systemd service
    sudo systemctl start mosquitto
@@ -94,7 +96,7 @@ DEFAULT_PASSWORD = "laptop"
 4. **Run the laptop controller:**
    ```bash
    cd Demos/Adaptive_audio
-   python3 audio_controller_laptop.py
+   python3 synchronized_audio_controller_laptop.py
    ```
 
 ---
@@ -135,12 +137,12 @@ DEFAULT_PASSWORD = "laptop"
 On your laptop:
 ```bash
 cd Demos/Adaptive_audio
-python3 audio_controller_laptop.py
+python3 synchronized_audio_controller_laptop.py
 ```
 
 You should see:
 ```
-✅ Connected to MQTT broker at 192.168.1.100:1883
+✅ Connected to MQTT broker at 192.168.1.100:1884
 
 🎹 Audio Controller Ready!
 Keyboard Commands:
@@ -156,13 +158,13 @@ Press keys and Enter...
 On RPi 1:
 ```bash
 cd Demos/Adaptive_audio
-python3 audio_player_rpi.py --id 1
+python3 synchronized_audio_player_rpi.py --id 1
 ```
 
 You should see:
 ```
 ✅ Audio initialized successfully
-✅ Connected to MQTT broker at 192.168.1.100:1883
+✅ Connected to MQTT broker at 192.168.1.100:1884
 ✅ MQTT Connected successfully
 📡 Subscribed to: audio/commands/broadcast
 📡 Subscribed to: audio/commands/rpi_1
@@ -176,13 +178,13 @@ You should see:
 On RPi 2:
 ```bash
 cd Demos/Adaptive_audio
-python3 audio_player_rpi.py --id 2
+python3 synchronized_audio_player_rpi.py --id 2
 ```
 
 You should see:
 ```
 ✅ Audio initialized successfully
-✅ Connected to MQTT broker at 192.168.1.100:1883
+✅ Connected to MQTT broker at 192.168.1.100:1884
 ✅ MQTT Connected successfully
 📡 Subscribed to: audio/commands/broadcast
 📡 Subscribed to: audio/commands/rpi_2
@@ -247,15 +249,15 @@ On the laptop controller, type commands:
 2. **Verify MQTT broker is running:**
    ```bash
    # On laptop, check if mosquitto is running
-   netstat -an | grep 1883
+   netstat -an | grep 1884
    # or
    ps aux | grep mosquitto
    ```
 
 3. **Check firewall settings:**
    ```bash
-   # Allow MQTT traffic on port 1883
-   sudo ufw allow 1883
+   # Allow MQTT traffic on port 1884
+   sudo ufw allow 1884
    ```
 
 ### **Audio Issues on RPi:**
@@ -359,7 +361,7 @@ python3 audio_player_rpi.py --id 1 --wav my_custom_audio.wav
 
 ### **Network Configuration:**
 ```bash
-python3 audio_controller_laptop.py --broker 192.168.1.100 --port 1883
+python3 audio_controller_laptop.py --broker 192.168.1.100 --port 1884
 ```
 
 ## 🎯 Example Session
