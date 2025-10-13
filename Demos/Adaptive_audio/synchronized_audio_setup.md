@@ -45,7 +45,7 @@ RPi 1 (Left Speaker)    RPi 2 (Right Speaker)
 ```python
 # ====== NETWORK CONFIGURATION ======
 # DEFAULT_BROKER_IP = "192.168.1.100"  # Your laptop's IP address
-DEFAULT_BROKER_IP = "172.20.20.3"  # MSI's ip addr on iphone hotspot
+DEFAULT_BROKER_IP = "172.20.10.3"  # MSI's ip addr on iphone hotspot
 DEFAULT_BROKER_PORT = 1884
 DEFAULT_USERNAME = "laptop"
 DEFAULT_PASSWORD = "laptop"
@@ -55,7 +55,7 @@ DEFAULT_PASSWORD = "laptop"
 ```python
 # ====== NETWORK CONFIGURATION ======
 # DEFAULT_BROKER_IP = "192.168.1.100"  # Your laptop's IP address
-DEFAULT_BROKER_IP = "172.20.20.3"  # MSI's ip addr on iphone hotspot
+DEFAULT_BROKER_IP = "172.20.10.3"  # MSI's ip addr on iphone hotspot
 DEFAULT_BROKER_PORT = 1884
 DEFAULT_USERNAME = "laptop"
 DEFAULT_PASSWORD = "laptop"
