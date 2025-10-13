@@ -122,14 +122,23 @@ class RPiAudioPlayer:
     def on_message(self, client, userdata, msg):
         """MQTT message callback."""
         try:
+            print(f"📨 Received MQTT message on topic: {msg.topic}")
+            print(f"📨 Payload: {msg.payload.decode()}")
+            
             message = json.loads(msg.payload.decode())
             command = message.get("command")
             execute_time = message.get("execute_time")
             rpi_id = message.get("rpi_id")
             
+            print(f"📨 Parsed - command: {command}, rpi_id: {rpi_id}, execute_time: {execute_time}")
+            print(f"📨 My RPi ID: {self.rpi_id}")
+            
             # Only process commands intended for this RPi or broadcast commands
             if rpi_id is None or rpi_id == self.rpi_id:
+                print(f"📨 Processing command for this RPi")
                 self.queue_command(command, execute_time, message)
+            else:
+                print(f"📨 Ignoring command for RPi {rpi_id}")
                 
         except Exception as e:
             print(f"❌ Error processing MQTT message: {e}")
