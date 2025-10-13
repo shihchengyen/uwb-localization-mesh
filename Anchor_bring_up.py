@@ -67,15 +67,21 @@ def get_anchor_id():
     return None
 
 
-def create_mqtt_config(broker_ip=None):
+def create_mqtt_config(broker_ip=None, anchor_id=None):
     """Create MQTT configuration."""
     broker = broker_ip or os.environ.get('MQTT_BROKER', 'localhost')
+    
+    # Use anchor ID if provided, otherwise fall back to hostname
+    if anchor_id is not None:
+        client_id = f"uwb_anchor_{anchor_id}"
+    else:
+        client_id = f"uwb_anchor_{socket.gethostname()}"
 
     return MQTTConfig(
         broker=broker,
         port=1884,
         base_topic="uwb",
-        client_id=f"uwb_anchor_{socket.gethostname()}"
+        client_id=client_id
     )
 
 
@@ -142,7 +148,7 @@ Environment Variables:
     anchor_info = ANCHOR_CONFIGS[anchor_id]
 
     # Create configurations
-    mqtt_config = create_mqtt_config(args.broker)
+    mqtt_config = create_mqtt_config(args.broker, anchor_id)
     uwb_config = create_uwb_config(anchor_id)
 
     # Override serial port if specified

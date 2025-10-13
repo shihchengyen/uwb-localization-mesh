@@ -155,11 +155,11 @@ Options:
 
 ## Auto-Detection Features
 
-The script automatically detects the anchor ID using:
+The script automatically detects the anchor ID using the following priority order:
 
-1. **Environment variable** `ANCHOR_ID`
-2. **Hostname detection** (looks for "anchor0", "rpi0", etc. in hostname)
-3. **Command line argument** `--anchor-id`
+1. **Command line argument** `--anchor-id` (highest priority)
+2. **Environment variable** `ANCHOR_ID`
+3. **Hostname detection** (looks for "anchor0", "anchor1", "anchor2", "anchor3" or "rpi0", "rpi1", "rpi2", "rpi3" in hostname)
 
 ### Recommended: Hostname-Based Setup
 

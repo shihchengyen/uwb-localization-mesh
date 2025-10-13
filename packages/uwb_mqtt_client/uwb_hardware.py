@@ -183,9 +183,12 @@ class UWBHardwareInterface:
         # Convert spherical to Cartesian (local frame only)
         v_local = self._r_local_from_az_el(r, az, el)
 
+        # Use the configured anchor_id instead of the parsed one from serial data (like TWR[0] makes the topic uwb/anchor/0/vector even for rpi1)
+        configured_anchor_id = self.config.anchor_id
+
         # Create measurement objects
         raw_measurement = RawUWBMeasurement(
-            anchor_id=anchor_id,
+            anchor_id=configured_anchor_id,
             distance_m=r,
             azimuth_deg=az,
             elevation_deg=el,
@@ -193,7 +196,7 @@ class UWBHardwareInterface:
         )
 
         processed_measurement = ProcessedUWBMeasurement(
-            anchor_id=anchor_id,
+            anchor_id=configured_anchor_id,
             timestamp_ns=time.time_ns(),
             vector_local=v_local,
             raw=raw_measurement

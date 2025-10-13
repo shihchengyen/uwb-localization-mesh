@@ -299,6 +299,10 @@ Current position: [123.45 234.56  50.00]
 - Ensure firewall allows port 1884: `sudo ufw allow 1884`
 - Check network connectivity between RPi and laptop
 
+### UWB board changed port (when say, upon manual reconnection)
+- Check port using `lsusb` or `ls /dev/ttyUSB*`
+- Use the new Usb port (eg if usb0 changed to usb1): `SERIAL_PORT=/dev/ttyUSB1 uv run python Anchor_bring_up.py --anchor-id 0 --broker 172.20.10.3`
+
 ---
 
 ## Next Steps
