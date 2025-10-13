@@ -67,7 +67,7 @@ DEFAULT_PASSWORD = "laptop"
 
 1. **Install dependencies:**
    ```bash
-   uv add pyserial pygame
+   pip install paho-mqtt pygame
    ```
 
 2. **Start MQTT broker:**
@@ -95,8 +95,8 @@ DEFAULT_PASSWORD = "laptop"
 
 4. **Run the laptop controller:**
    ```bash
-   cd Demos/Adaptive_audio
-   python3 synchronized_audio_controller_laptop.py
+   # run from parent folder for dependencies to work.
+   uv run python Demos/Adaptive_audio/synchronized_audio_controller_laptop.py --broker 172.20.10.3 #laptop IP
    ```
 
 ---

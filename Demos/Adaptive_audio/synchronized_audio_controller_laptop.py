@@ -39,7 +39,7 @@ class AudioController:
             client_id="audio_controller_laptop"
         )
         
-        self.client = mqtt.Client(client_id=self.config.client_id)
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=self.config.client_id)
         self.client.username_pw_set(username=DEFAULT_USERNAME, password=DEFAULT_PASSWORD)
         
         # Topic for audio commands

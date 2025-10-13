@@ -44,7 +44,7 @@ class RPiAudioPlayer:
             client_id=f"audio_player_rpi_{rpi_id}"
         )
         
-        self.client = mqtt.Client(client_id=self.config.client_id)
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=self.config.client_id)
         self.client.username_pw_set(username=DEFAULT_USERNAME, password=DEFAULT_PASSWORD)
         
         # Topics to subscribe to
