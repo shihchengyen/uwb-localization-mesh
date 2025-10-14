@@ -8,7 +8,7 @@ A clean, simple visualization of UWB positioning data with:
 - Minimal, focused UI
 """
 import matplotlib
-matplotlib.use("QtAgg")
+# matplotlib.use("QtAgg")
 import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.pyplot as plt
