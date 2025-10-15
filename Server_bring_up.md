@@ -238,7 +238,7 @@ Start the server with your laptop's IP:
 ```python
 # Configure MQTT with your laptop's IP
 mqtt_config = MQTTConfig(
-    broker="192.168.68.66",  # Replace with your laptop's IP
+    broker="192.168.68.66",  # Replace with your laptop's IP, or tbh it doesnt matter cuz we add the laptop ip as an argument when calling the file
     port=1884
 )
 

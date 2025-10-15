@@ -283,7 +283,7 @@ if __name__ == "__main__":
         "port": args.port
     }))
     
-    # Start server
+    # Start server (jitter temporarily disabled)
     server = ServerBringUp(
         mqtt_config=mqtt_config,
         jitter_std=0.0  # Jittering disabled
