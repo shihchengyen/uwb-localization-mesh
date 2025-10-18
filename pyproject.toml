@@ -12,6 +12,7 @@ dependencies = [
     "matplotlib>=3.5.0",
     "pyserial>=3.5",
     "pygame>=2.0.0",    # for adaptive audio demo
+    "rich>=13.0.0",     # for enhanced CLI interface
 ]
 requires-python = ">=3.8"
 
