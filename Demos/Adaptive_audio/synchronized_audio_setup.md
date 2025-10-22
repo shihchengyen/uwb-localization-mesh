@@ -208,9 +208,9 @@ On the laptop controller, type commands:
 ## 🎹 Usage
 
 ### **Laptop Controls:**
-- `s` + Enter: **START** - Start playing audio on all RPis at 20% volume
-- `a` + Enter: **LEFT** - Pan audio left (RPi 1,2 louder; RPi 0,3 quieter)
-- `d` + Enter: **RIGHT** - Pan audio right (RPi 1,2 quieter; RPi 0,3 louder)
+- `s` + Enter: **START** - Start playing audio on all RPis at 70% volume
+- `a` + Enter: **LEFT** - Pan audio left (RPi 1,2 louder; RPi 0,3 quieter) - controls all RPis
+- `d` + Enter: **RIGHT** - Pan audio right (RPi 1,2 quieter; RPi 0,3 louder) - controls all RPis
 - `q` + Enter: **QUIT** - Exit the controller
 
 ### **Volume Changes:**

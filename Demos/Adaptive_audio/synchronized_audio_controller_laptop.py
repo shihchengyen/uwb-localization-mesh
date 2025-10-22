@@ -131,27 +131,13 @@ class AudioController:
                 elif user_input == 's':
                     self.send_command("start")
                 elif user_input == 'a':
-                    print("Choose RPi (1,2=left; 0,3=right; or press Enter for all):")
-                    rpi_choice = input().strip()
-                    if rpi_choice in ["1", "2"]:
-                        self.send_command("left", rpi_id=int(rpi_choice))
-                    elif rpi_choice in ["0", "3"]:
-                        self.send_command("left", rpi_id=int(rpi_choice))
-                    else:
-                        # Send to all RPIs
-                        for rpi_id in [0, 1, 2, 3]:
-                            self.send_command("left", rpi_id=rpi_id)
+                    # Send to all RPIs by default
+                    for rpi_id in [0, 1, 2, 3]:
+                        self.send_command("left", rpi_id=rpi_id)
                 elif user_input == 'd':
-                    print("Choose RPi (1,2=left; 0,3=right; or press Enter for all):")
-                    rpi_choice = input().strip()
-                    if rpi_choice in ["1", "2"]:
-                        self.send_command("right", rpi_id=int(rpi_choice))
-                    elif rpi_choice in ["0", "3"]:
-                        self.send_command("right", rpi_id=int(rpi_choice))
-                    else:
-                        # Send to all RPIs
-                        for rpi_id in [0, 1, 2, 3]:
-                            self.send_command("right", rpi_id=rpi_id)
+                    # Send to all RPIs by default
+                    for rpi_id in [0, 1, 2, 3]:
+                        self.send_command("right", rpi_id=rpi_id)
                 else:
                     print(f"❌ Unknown command: {user_input}")
                     print("Valid commands: s, a, d, q")
