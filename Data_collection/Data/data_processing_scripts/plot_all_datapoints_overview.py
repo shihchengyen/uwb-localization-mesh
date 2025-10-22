@@ -9,7 +9,7 @@ from typing import Dict, List
 
 # Import the transformation functions from the localization package
 import sys
-sys.path.append(str(Path(__file__).parent.parent / 'packages'))
+sys.path.append(str(Path(__file__).parent.parent.parent.parent / 'packages'))
 from localization_algos.edge_creation.transforms import ANCHOR_R
 
 def plot_all_datapoints_overview(csv_path):
@@ -102,7 +102,7 @@ def plot_all_datapoints_overview(csv_path):
     ax.axis('equal')
 
     # Save the plot
-    output_path = Path(__file__).parent / 'Data' / 'all_datapoints_overview.png'
+    output_path = Path(__file__).parent.parent / 'all_datapoints_overview.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"All datapoints overview plot saved to: {output_path}")
 
@@ -171,6 +171,7 @@ def create_error_summary_plot(csv_path):
     axes[0].set_xlabel('Row Number')
     axes[0].set_ylabel('Error (cm)')
     axes[0].set_title('PGO Positioning Error by Row')
+    axes[0].set_ylim(0, 400)
     axes[0].grid(True, alpha=0.3)
 
     # Plot 2: Individual node errors
@@ -185,6 +186,7 @@ def create_error_summary_plot(csv_path):
     axes[1].set_xlabel('Row Number')
     axes[1].set_ylabel('Error (cm)')
     axes[1].set_title('Individual Node Positioning Error by Row')
+    axes[1].set_ylim(0, 400)
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 
@@ -238,7 +240,7 @@ def create_error_summary_plot(csv_path):
     plt.tight_layout()
 
     # Save the error summary plot
-    output_path = Path(__file__).parent / 'Data' / 'all_datapoints_error_summary.png'
+    output_path = Path(__file__).parent.parent / 'all_datapoints_error_summary.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"Error summary plot saved to: {output_path}")
 
@@ -246,7 +248,7 @@ def create_error_summary_plot(csv_path):
 
 if __name__ == "__main__":
     # Path to the data file
-    data_path = Path(__file__).parent / "Data" / "datapoints(unsure).csv"
+    data_path = Path(__file__).parent.parent / "datapoints(unsure).csv"
 
     print(f"Creating comprehensive overview from: {data_path}")
 
