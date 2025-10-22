@@ -23,9 +23,9 @@ measurement = Measurement(
 
 # Create anchor config
 anchor_config = AnchorConfig(positions={
-    0: np.array([440, 550, 0]),
-    1: np.array([0, 550, 0]),
-    2: np.array([440, 0, 0]),
+    0: np.array([480, 600, 0]),
+    1: np.array([0, 600, 0]),
+    2: np.array([480, 0, 0]),
     3: np.array([0, 0, 0])
 })
 ```

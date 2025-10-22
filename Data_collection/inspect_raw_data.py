@@ -91,8 +91,8 @@ def display_anchor_box(anchor_id, local_vector, global_vector):
     phone_position = ANCHORS[anchor_id] + global_vector
 
     # Check bounds
-    x_ok = 0 <= phone_position[0] <= 440
-    y_ok = 0 <= phone_position[1] <= 550
+    x_ok = 0 <= phone_position[0] <= 480
+    y_ok = 0 <= phone_position[1] <= 600
     z_ok = 0 <= phone_position[2] <= 239
     bounds_ok = x_ok and y_ok and z_ok
 
@@ -197,7 +197,7 @@ def print_header():
     print("Use this to verify if rotation matrices are correct.")
     print()
     print("Room setup:")
-    print("  Room size: 440cm x 550cm, height: 239cm")
+    print("  Room size: 480cm x 600cm, height: 239cm")
     print("  Anchor positions:")
     for i in range(4):
         print(f"    Anchor {i}: [{ANCHORS[i][0]:.0f}, {ANCHORS[i][1]:.0f}, {ANCHORS[i][2]:.0f}]")

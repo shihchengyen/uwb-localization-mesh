@@ -101,9 +101,9 @@ class ServerBringUp:
     def __init__(self):
         # Ground truth
         self.true_nodes = {
-            0: np.array([440, 550, 0]),  # top-right
-            1: np.array([0, 550, 0]),    # top-left
-            2: np.array([440, 0, 0]),    # bottom-right
+            0: np.array([480, 600, 0]),  # top-right
+            1: np.array([0, 600, 0]),    # top-left
+            2: np.array([480, 0, 0]),    # bottom-right
             3: np.array([0, 0, 0])       # bottom-left
         }
         

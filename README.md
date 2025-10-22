@@ -162,12 +162,12 @@ PGOResult → Global State
 - **Extensible:** Clean separation allows easy addition of new processing stages or outputs
 
 ### Configuration & Ground Truth
-- **Room Dimensions:** 440cm × 550cm
+- **Room Dimensions:**480cm × 600cm
 - **Anchor Heights:** All at 239cm (2.39m) from floor
 - **Anchor Positions:**
-  - Anchor 0: [440, 550, 239] (top-right)
-  - Anchor 1: [0, 550, 239] (top-left)
-  - Anchor 2: [440, 0, 239] (bottom-right)
+  - Anchor 0: [480, 600, 239] (top-right)
+  - Anchor 1: [0, 600, 239] (top-left)
+  - Anchor 2: [480, 0, 239] (bottom-right)
   - Anchor 3: [0, 0, 239] (bottom-left, origin)
 
 ---

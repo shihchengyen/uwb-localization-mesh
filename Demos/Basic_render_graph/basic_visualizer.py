@@ -23,8 +23,8 @@ from packages.uwb_mqtt_server.config import MQTTConfig
 from Server_bring_up import ServerBringUp
 
 # Room and anchor configuration
-ROOM_WIDTH_CM = 440   # Width of room in cm
-ROOM_HEIGHT_CM = 550  # Height of room in cm
+ROOM_WIDTH_CM = 480   # Width of room in cm
+ROOM_HEIGHT_CM = 600  # Height of room in cm
 GRID_SIZE_CM = 110    # Grid square size in cm
 
 # Anchor positions (cm)

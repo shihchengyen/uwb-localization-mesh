@@ -19,13 +19,13 @@ A clean, simple visualization for the UWB positioning system. This demo provides
 The visualization uses the standard room configuration:
 
 ```
-A1 (0,550,0) +-----------------+ A0 (440,550,0)
+A1 (0,600,0) +-----------------+ A0 (480,600,0)
              |                 |
              |                 |
              |      Room      |
              |                 |
              |                 |
-A3 (0,0,0)   +-----------------+ A2 (440,0,0)
+A3 (0,0,0)   +-----------------+ A2 (480,0,0)
 ```
 
 ## Usage
@@ -48,8 +48,8 @@ You can adjust these parameters in `basic_visualizer.py`:
 
 ```python
 # Room dimensions
-ROOM_WIDTH_CM = 440   # Width in cm
-ROOM_HEIGHT_CM = 550  # Height in cm
+ROOM_WIDTH_CM = 480   # Width in cm
+ROOM_HEIGHT_CM = 600  # Height in cm
 GRID_SIZE_CM = 110    # Grid square size in cm
 
 # Visualization settings

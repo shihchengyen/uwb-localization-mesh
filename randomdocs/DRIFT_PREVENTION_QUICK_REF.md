@@ -147,9 +147,9 @@ Anchoring Transformation
   • Rotate to match true A0 direction
          ↓
 Hard Anchor Fixing
-  • A0 = (440, 550, 239) exactly
-  • A1 = (0, 550, 239) exactly
-  • A2 = (440, 0, 239) exactly
+  • A0 = (480, 600, 239) exactly
+  • A1 = (0, 600, 239) exactly
+  • A2 = (480, 0, 239) exactly
   • A3 = (0, 0, 239) exactly
          ↓
 Phone inherits same transformation
@@ -226,9 +226,9 @@ anchored_positions = apply_anchoring_transformation(...)
 ```python
 # In Server_bring_up.py
 self.true_nodes = {
-    0: np.array([440, 550, 239]),  # Must match physical setup
-    1: np.array([0, 550, 239]),
-    2: np.array([440, 0, 239]),
+    0: np.array([480, 600, 239]),  # Must match physical setup
+    1: np.array([0, 600, 239]),
+    2: np.array([480, 0, 239]),
     3: np.array([0, 0, 239])
 }
 ```
