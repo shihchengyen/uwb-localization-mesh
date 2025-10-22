@@ -25,8 +25,15 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # parent folder to path, but independent of laptop
 
-from demo_implementation.transform_to_global_vector import ANCHOR_R, Rz, Ry
-from demo_implementation.create_anchor_edges import ANCHORS
+from packages.localization_algos.edge_creation.transforms import ANCHOR_R, Rz, Ry
+
+# Anchor positions (cm) - same as in basic_visualizer.py
+ANCHORS = {
+    0: np.array([480, 600, 0]),  # Top-right
+    1: np.array([0, 600, 0]),    # Top-left
+    2: np.array([480, 0, 0]),    # Bottom-right
+    3: np.array([0, 0, 0])       # Bottom-left (origin)
+}
 
 # MQTT Configuration
 MQTT_BROKER = "localhost"  # Changed from 192.168.99.3 to localhost
