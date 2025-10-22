@@ -16,7 +16,7 @@ RPi 1,2 (Left Speakers)    RPi 0,3 (Right Speakers)
 
 ### 1. **Laptop Controller** (`audio_controller_laptop.py`)
 - Publishes MQTT commands with global timing
-- Keyboard controls: `s` (start), `a` (left), `d` (right), `q` (quit)
+- Keyboard controls: `s` (start), `p` (pause), `a` (left), `d` (right), `q` (quit)
 - 500ms delay from keyboard press to execution
 - Tracks volume levels for each RPi
 
@@ -209,6 +209,7 @@ On the laptop controller, type commands:
 
 ### **Laptop Controls:**
 - `s` + Enter: **START** - Start playing audio on all RPis at 70% volume
+- `p` + Enter: **PAUSE** - Pause synchronized audio on all RPis
 - `a` + Enter: **LEFT** - Pan audio left (RPi 1,2 louder; RPi 0,3 quieter) - controls all RPis
 - `d` + Enter: **RIGHT** - Pan audio right (RPi 1,2 quieter; RPi 0,3 louder) - controls all RPis
 - `q` + Enter: **QUIT** - Exit the controller
@@ -389,8 +390,10 @@ python3 audio_controller_laptop.py --broker 192.168.1.100 --port 1884
 4. **Start RPi 2 audio player** (left speaker) - when facing the other way
 5. **Start RPi 3 audio player** (right speaker) - when facing the other way
 6. **Press `s`** → All RPis start playing at 70% volume
-7. **Press `a`** → Audio pans left (RPi 1,2: 80%; RPi 0,3: 60%)
-8. **Press `d`** → Audio pans right (RPi 1,2: 55%; RPi 0,3: 85%)
-9. **Press `q`** → Stop controller
+7. **Press `a`** → Audio pans left (RPi 1,2: 85%; RPi 0,3: 55%)
+8. **Press `d`** → Audio pans right (RPi 1,2: 70%; RPi 0,3: 85%)
+9. **Press `p`** → All RPis pause synchronized
+10. **Press `s`** → Resume playing from where paused
+11. **Press `q`** → Stop controller
 
 The system provides smooth, synchronized audio panning across multiple speakers with precise timing control!

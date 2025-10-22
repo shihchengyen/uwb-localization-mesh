@@ -116,6 +116,7 @@ class AudioController:
         print("\n🎹 Audio Controller Ready!")
         print("Keyboard Commands:")
         print("  s = START (broadcast to all RPIs)")
+        print("  p = PAUSE (pause audio on all RPIs)")
         print("  a = LEFT (pan left - RPi 1,2 louder; RPi 0,3 quieter)")
         print("  d = RIGHT (pan right - RPi 1,2 quieter; RPi 0,3 louder)")
         print("  q = QUIT")
@@ -130,6 +131,10 @@ class AudioController:
                     break
                 elif user_input == 's':
                     self.send_command("start")
+                elif user_input == 'p':
+                    # Send pause command to all RPIs
+                    for rpi_id in [0, 1, 2, 3]:
+                        self.send_command("pause", rpi_id=rpi_id)
                 elif user_input == 'a':
                     # Send to all RPIs by default
                     for rpi_id in [0, 1, 2, 3]:
@@ -140,7 +145,7 @@ class AudioController:
                         self.send_command("right", rpi_id=rpi_id)
                 else:
                     print(f"❌ Unknown command: {user_input}")
-                    print("Valid commands: s, a, d, q")
+                    print("Valid commands: s, p, a, d, q")
                     
             except KeyboardInterrupt:
                 print("\n👋 Shutting down...")

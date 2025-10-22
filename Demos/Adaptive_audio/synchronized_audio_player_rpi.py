@@ -240,6 +240,14 @@ class RPiAudioPlayer:
                 else:
                     print(f"🎵 Already playing at {self.current_volume}%")
             
+            elif command == "pause":
+                if self.is_playing:
+                    pygame.mixer.music.pause()
+                    self.is_playing = False
+                    print(f"⏸️  PAUSED at {self.current_volume}%")
+                else:
+                    print(f"⏸️  Already paused at {self.current_volume}%")
+            
             elif command in ["left", "right"]:
                 old_volume = self.current_volume
                 
