@@ -49,7 +49,7 @@ class AudioController:
         self.connect_mqtt()
         
         # Current volume tracking
-        self.volumes = {1: 70, 2: 70}  # RPi ID -> current volume
+        self.volumes = {0: 70, 1: 70, 2: 70, 3: 70}  # RPi ID -> current volume
         
     def connect_mqtt(self):
         """Connect to MQTT broker."""
@@ -80,16 +80,16 @@ class AudioController:
         }
         
         # Update volume tracking for left/right commands
-        if command in ["left", "right"] and rpi_id:
+        if command in ["left", "right"] and rpi_id is not None:
             if command == "left":
-                if rpi_id == 1:
+                if rpi_id in [1, 2]:  # Left speakers get louder
                     self.volumes[rpi_id] = min(100, self.volumes[rpi_id] + 10)
-                else:  # rpi_id == 2
+                else:  # Right speakers get quieter
                     self.volumes[rpi_id] = max(0, self.volumes[rpi_id] - 10)
             elif command == "right":
-                if rpi_id == 1:
+                if rpi_id in [1, 2]:  # Left speakers get quieter
                     self.volumes[rpi_id] = max(0, self.volumes[rpi_id] - 15)
-                else:  # rpi_id == 2
+                else:  # Right speakers get louder
                     self.volumes[rpi_id] = min(100, self.volumes[rpi_id] + 15)
             
             message["target_volume"] = self.volumes[rpi_id]
@@ -116,8 +116,8 @@ class AudioController:
         print("\n🎹 Audio Controller Ready!")
         print("Keyboard Commands:")
         print("  s = START (broadcast to all RPIs)")
-        print("  a = LEFT (pan left - RPi 1 louder, RPi 2 quieter)")
-        print("  d = RIGHT (pan right - RPi 1 quieter, RPi 2 louder)")
+        print("  a = LEFT (pan left - RPi 1,2 louder; RPi 0,3 quieter)")
+        print("  d = RIGHT (pan right - RPi 1,2 quieter; RPi 0,3 louder)")
         print("  q = QUIT")
         print("\nPress keys and Enter...")
         
@@ -131,25 +131,27 @@ class AudioController:
                 elif user_input == 's':
                     self.send_command("start")
                 elif user_input == 'a':
-                    print("Choose RPi (1=left, 2=right, or press Enter for both):")
+                    print("Choose RPi (1,2=left; 0,3=right; or press Enter for all):")
                     rpi_choice = input().strip()
-                    if rpi_choice == "1":
-                        self.send_command("left", rpi_id=1)
-                    elif rpi_choice == "2":
-                        self.send_command("left", rpi_id=2)
+                    if rpi_choice in ["1", "2"]:
+                        self.send_command("left", rpi_id=int(rpi_choice))
+                    elif rpi_choice in ["0", "3"]:
+                        self.send_command("left", rpi_id=int(rpi_choice))
                     else:
-                        self.send_command("left", rpi_id=1)
-                        self.send_command("left", rpi_id=2)
+                        # Send to all RPIs
+                        for rpi_id in [0, 1, 2, 3]:
+                            self.send_command("left", rpi_id=rpi_id)
                 elif user_input == 'd':
-                    print("Choose RPi (1=left, 2=right, or press Enter for both):")
+                    print("Choose RPi (1,2=left; 0,3=right; or press Enter for all):")
                     rpi_choice = input().strip()
-                    if rpi_choice == "1":
-                        self.send_command("right", rpi_id=1)
-                    elif rpi_choice == "2":
-                        self.send_command("right", rpi_id=2)
+                    if rpi_choice in ["1", "2"]:
+                        self.send_command("right", rpi_id=int(rpi_choice))
+                    elif rpi_choice in ["0", "3"]:
+                        self.send_command("right", rpi_id=int(rpi_choice))
                     else:
-                        self.send_command("right", rpi_id=1)
-                        self.send_command("right", rpi_id=2)
+                        # Send to all RPIs
+                        for rpi_id in [0, 1, 2, 3]:
+                            self.send_command("right", rpi_id=rpi_id)
                 else:
                     print(f"❌ Unknown command: {user_input}")
                     print("Valid commands: s, a, d, q")
