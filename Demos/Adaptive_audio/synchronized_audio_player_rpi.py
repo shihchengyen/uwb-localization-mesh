@@ -248,6 +248,15 @@ class RPiAudioPlayer:
                 else:
                     print(f"⏸️  Already paused at {self.current_volume}%")
             
+            elif command == "volume": # volume is set by the controller, but can be muted here (overridden with vol=0)
+                # Handle volume command from controller
+                target_volume = message.get("target_volume")
+                if target_volume is not None:
+                    old_volume = self.current_volume
+                    self.current_volume = max(0, min(100, int(target_volume)))
+                    pygame.mixer.music.set_volume(self.current_volume / 100.0)
+                    print(f"🔊 VOLUME: {old_volume}% → {self.current_volume}%")
+            
             elif command in ["left", "right"]:
                 old_volume = self.current_volume
                 
