@@ -189,24 +189,45 @@ class PositionAwareAudioController(ServerBringUp):
         else:
             active_speakers = [0, 1]  # RPi 0,1
         
-        # Send command only to active speakers
-        if rpi_id is None:
-            # Send to all active speakers
-            for speaker_id in active_speakers:
-                self.send_audio_command(command, rpi_id=speaker_id)
-        elif rpi_id in active_speakers:
-            # Send to specific active speaker
-            self.send_audio_command(command, rpi_id=rpi_id)
+        # For start/stop commands: send to ALL RPis for synchronization
+        if command in ["start", "pause"]:
+            if rpi_id is None:
+                # Send to all RPis for synchronization
+                for speaker_id in [0, 1, 2, 3]:
+                    self.send_audio_command(command, rpi_id=speaker_id)
+            else: # if user specify particular rpi for the command
+                # Send to specific RPi
+                self.send_audio_command(command, rpi_id=rpi_id)
+        
+        # For volume control commands: send only to active speakers
+        elif command in ["left", "right", "volume"]:
+            if rpi_id is None:
+                # Send to all active speakers only
+                for speaker_id in active_speakers:
+                    self.send_audio_command(command, rpi_id=speaker_id)
+            elif rpi_id in active_speakers:
+                # Send to specific active speaker
+                self.send_audio_command(command, rpi_id=rpi_id)
+            else:
+                # Speaker is not active, don't send volume command
+                print(f"⚠️  RPi {rpi_id} is not active (current pair: {self.current_speaker_pair})")
+        
         else:
-            # Speaker is not active, don't send command
-            print(f"⚠️  RPi {rpi_id} is not active (current pair: {self.current_speaker_pair})")
+            # Unknown template command, send to all active speakers. Not used for now.
+            if rpi_id is None:
+                for speaker_id in active_speakers:
+                    self.send_audio_command(command, rpi_id=speaker_id)
+            elif rpi_id in active_speakers:
+                self.send_audio_command(command, rpi_id=rpi_id)
+            else:
+                print(f"⚠️  RPi {rpi_id} is not active (current pair: {self.current_speaker_pair})")
     
     def keyboard_loop(self):
         """Main keyboard input loop."""
         print("\n🎹 Position-Aware Audio Controller Ready!")
         print("Keyboard Commands:")
-        print("  s = START (start audio on active speaker pair)")
-        print("  p = PAUSE (pause audio on active speaker pair)")
+        print("  s = START (start audio on ALL speakers for sync)")
+        print("  p = PAUSE (pause audio on ALL speakers for sync)")
         print("  a = LEFT (pan left - active speakers only)")
         print("  d = RIGHT (pan right - active speakers only)")
         print("  q = QUIT")
@@ -225,9 +246,7 @@ class PositionAwareAudioController(ServerBringUp):
                 elif user_input == 's':
                     self.send_command("start")
                 elif user_input == 'p':
-                    # Send pause command to all RPIs
-                    for rpi_id in [0, 1, 2, 3]:
-                        self.send_command("pause", rpi_id=rpi_id)
+                    self.send_command("pause")
                 elif user_input == 'a':
                     self.send_command("left")
                 elif user_input == 'd':
