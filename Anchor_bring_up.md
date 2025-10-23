@@ -232,9 +232,9 @@ mosquitto_sub -h localhost -t "uwb/0/measurements" | jq .
 
 The system assumes standard anchor positions (can be modified in localization server):
 
-- **Anchor 0**: Top-right (440, 550, 0) cm
-- **Anchor 1**: Top-left (0, 550, 0) cm
-- **Anchor 2**: Bottom-right (440, 0, 0) cm
+- **Anchor 0**: Top-right (480, 600, 0) cm
+- **Anchor 1**: Top-left (0, 600, 0) cm
+- **Anchor 2**: Bottom-right (480, 0, 0) cm
 - **Anchor 3**: Bottom-left (origin) (0, 0, 0) cm
 
 ## Next Steps

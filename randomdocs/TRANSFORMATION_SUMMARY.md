@@ -30,9 +30,9 @@
 ```python
 # Input: Ground truth positions (ALREADY GLOBAL)
 true_nodes = {
-    0: np.array([440, 550, 239]),  # Global (x,y,z) cm
-    1: np.array([0, 550, 239]),
-    2: np.array([440, 0, 239]),
+    0: np.array([480, 600, 239]),  # Global (x,y,z) cm
+    1: np.array([0, 600, 239]),
+    2: np.array([480, 0, 239]),
     3: np.array([0, 0, 239])
 }
 
@@ -42,7 +42,7 @@ def create_anchor_anchor_edges(anchor_config):
     edges.append((anchor_i, anchor_j, relative_vec))
 
 # Output: Vectors in GLOBAL frame
-Example: anchor_0 → anchor_1 = [-440, 0, 0] ✓
+Example: anchor_0 → anchor_1 = [-480, 0, 0] ✓
 ```
 
 **Path**: `anchor_edges.py` → NO TRANSFORM → Global vectors
@@ -79,7 +79,7 @@ Anchor Positions:
     ┌──────────────────────────┐
     │ Surveyed/measured in     │
     │ GLOBAL room coordinates  │──┐
-    │ (440, 550, 239) etc.     │  │ Already global
+    │ (480, 600, 239) etc.     │  │ Already global
     └──────────────────────────┘  │ NO transform needed
                                   │
                                   ▼
@@ -110,9 +110,9 @@ UWB Measurements:
 All 12 edges verified to be simple position differences:
 
 ```
-✓ anchor_0 → anchor_1: [-440, 0, 0] (expected: [-440, 0, 0])
-✓ anchor_0 → anchor_2: [0, -550, 0] (expected: [0, -550, 0])
-✓ anchor_0 → anchor_3: [-440, -550, 0] (expected: [-440, -550, 0])
+✓ anchor_0 → anchor_1: [-480, 0, 0] (expected: [-480, 0, 0])
+✓ anchor_0 → anchor_2: [0, -600, 0] (expected: [0, -600, 0])
+✓ anchor_0 → anchor_3: [-480, -600, 0] (expected: [-480, -600, 0])
 ... (9 more edges all correct)
 ```
 

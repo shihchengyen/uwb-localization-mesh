@@ -27,8 +27,8 @@ from PyQt5.QtWidgets import (
 )
 
 # ----- Physical area and grid spec -----
-AREA_WIDTH_M = 5.50    # meters (550 cm) -> LONG side (10 cells)
-AREA_HEIGHT_M = 4.40   # meters (440 cm) -> SHORT side (8 cells)
+AREA_WIDTH_M = 6.00    # meters (600 cm) -> LONG side (10 cells)
+AREA_HEIGHT_M = 4.80   # meters (480 cm) -> SHORT side (8 cells)
 GRID_COLS = 10
 GRID_ROWS = 8
 CELL_SIZE_M = AREA_WIDTH_M / GRID_COLS  # expected 0.55 m

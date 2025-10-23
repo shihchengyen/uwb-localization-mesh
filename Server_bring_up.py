@@ -48,10 +48,10 @@ class ServerBringUp:
         # Ground truth anchor positions (cm)
         # Anchors are mounted at 239 cm (2.39m) height
         self.true_nodes = {
-            0: np.array([440, 550, 239]),  # top-right
-            1: np.array([0, 550, 239]),    # top-left
-            2: np.array([440, 0, 239]),    # bottom-right
-            3: np.array([0, 0, 239])       # bottom-left (origin in XY, but at sensor height in Z)
+            0: np.array([480, 600, 0]),  # top-right
+            1: np.array([0, 600, 0]),    # top-left
+            2: np.array([480, 0, 0]),    # bottom-right
+            3: np.array([0, 0, 0])       # bottom-left (origin in XY, but at sensor height in Z)
         }
         
         # Working copy of nodes that can be jittered (jittering temporarily disabled)

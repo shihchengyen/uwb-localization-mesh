@@ -7,9 +7,171 @@ This repository contains **reusable packages** (e.g., `PGO`, `localization‑alg
 - **Demos**: thin scripts that call into running components to visualize or sonify results.
 - **Data_collection**: follows the same pattern as a demo for capturing data for evaluation.
 
-> Folder names may contain hyphens today, but **Python package names should be snake_case** when you refactor (e.g., `uwb_mqtt_client`).
+---
+
+## 🏗️ System Architecture & Data Flow
+
+### Overview
+This UWB localization system processes real-time measurements from 4 fixed anchors to estimate the 3D position of a mobile phone. The system uses MQTT for distributed communication, sliding window binning for temporal aggregation, and Pose Graph Optimization (PGO) for position estimation.
+
+### Hardware Layer
+- **4 UWB Anchors**: Raspberry Pi devices with UWB modules mounted at room corners
+- **Mobile Phone**: Target device with UWB capability being localized
+- **MQTT Broker**: Central message hub (Mosquitto) running on laptop/server
+
+### Core Data Flow Pipeline
+
+```mermaid
+flowchart TD
+    %% Hardware Input Layer
+    subgraph "Hardware Layer"
+        A0[UWB Anchor 0<br/>RPi + UWB Module]
+        A1[UWB Anchor 1<br/>RPi + UWB Module]
+        A2[UWB Anchor 2<br/>RPi + UWB Module]
+        A3[UWB Anchor 3<br/>RPi + UWB Module]
+        PHONE[UWB Phone<br/>Target Device]
+    end
+
+    %% Communication Layer
+    subgraph "Communication Layer"
+        MQTT[(MQTT Broker<br/>Mosquitto)]
+    end
+
+    %% Processing Layer - Server Bring-up
+    subgraph "Processing Layer (Server_bring_up.py)"
+        INGEST[MQTT Ingestion<br/>UWBMQTTServer]
+        BIN[Sliding Window Binning<br/>1s windows per phone]
+        EDGES[Edge Creation<br/>anchor↔anchor + anchor→phone]
+        PGO[PGO Optimization<br/>Nonlinear least squares]
+        STATE[Global State<br/>user_position, data dict]
+    end
+
+    %% Application Layer
+    subgraph "Application Layer"
+        VIZ[Basic_render_graph<br/>Real-time visualization]
+        AUDIO_FOLLOW[Follow_me_audio<br/>Spatial audio routing]
+        AUDIO_ADAPTIVE[Adaptive_audio<br/>Dynamic mixing]
+        DATA_COLLECTION[Data_collection<br/>Logging & evaluation]
+    end
+
+    %% Data Flow
+    A0 -->|uwb/anchor/0/vector| MQTT
+    A1 -->|uwb/anchor/1/vector| MQTT
+    A2 -->|uwb/anchor/2/vector| MQTT
+    A3 -->|uwb/anchor/3/vector| MQTT
+
+    MQTT -->|subscribe| INGEST
+    INGEST -->|Measurement list| BIN
+    BIN -->|BinnedData dict| EDGES
+    EDGES -->|Edge list| PGO
+    PGO -->|PGOResult| STATE
+
+    STATE --> VIZ
+    STATE --> AUDIO_FOLLOW
+    STATE --> AUDIO_ADAPTIVE
+    STATE --> DATA_COLLECTION
+
+    %% Styling
+    classDef hardware fill:#e1f5fe,stroke:#01579b
+    classDef comm fill:#f3e5f5,stroke:#4a148c
+    classDef processing fill:#e8f5e8,stroke:#1b5e20
+    classDef app fill:#fff3e0,stroke:#e65100
+
+    class A0,A1,A2,A3,PHONE hardware
+    class MQTT comm
+    class INGEST,BIN,EDGES,PGO,STATE processing
+    class VIZ,AUDIO_FOLLOW,AUDIO_ADAPTIVE,DATA_COLLECTION app
+```
+
+### Detailed Data Flow Through Server_bring_up.py
+
+#### 1. **Measurement Ingestion** (`UWBMQTTServer`)
+```
+MQTT Message → Measurement dataclass
+├── timestamp: float (NTP epoch seconds)
+├── anchor_id: int (0-3)
+├── phone_node_id: int (currently always 0)
+└── local_vector: np.ndarray [x,y,z] in cm (anchor's local frame)
+```
+
+**MQTT Topic Structure:**
+- `uwb/anchor/{anchor_id}/vector` (wildcard subscription)
+- Payload: `{"t_unix_ns": int, "vector_local": {"x": float, "y": float, "z": float}}`
+
+#### 2. **Sliding Window Binning** (`SlidingWindowBinner`)
+```
+Measurement[] → BinnedData dataclass (1-second windows)
+├── bin_start_time: float
+├── bin_end_time: float
+├── phone_node_id: int
+└── measurements: Dict[int, List[np.ndarray]]
+    └── anchor_id → [vector1, vector2, ...] (averaged later)
+```
+
+**Key Features:**
+- Maintains sliding window of recent measurements
+- Drops measurements older than window size
+- Groups measurements by anchor within each window
+- Tracks binning metrics (late drops, per-anchor counts)
+
+#### 3. **Edge Creation** (transforms.py + anchor_edges.py)
+```
+BinnedData → Edge[] tuples: (from_node, to_node, relative_vector)
+```
+
+**Two types of edges:**
+- **Anchor-Anchor Edges** (static, pre-computed):
+  - Based on ground truth anchor positions
+  - Creates constraints between all anchor pairs
+  - Transforms to global coordinate frame
+
+- **Anchor-Phone Edges** (dynamic, per-bin):
+  - Average vectors within each 1s bin per anchor
+  - Transform from anchor's local frame to global frame
+  - Uses coordinate transformations accounting for anchor orientations
+
+#### 4. **Pose Graph Optimization** (`PGOSolver`)
+```
+Edge[] + anchor_positions → PGOResult
+├── node_positions: Dict[str, np.ndarray] (optimized positions)
+├── success: bool
+├── iterations: int
+├── error: float (optimization residual)
+```
+
+**Optimization Process:**
+- **Nodes:** `anchor_0`, `anchor_1`, `anchor_2`, `anchor_3`, `phone_0`
+- **Anchored Optimization:** Anchors start at ground truth positions, phone starts floating
+- **Nonlinear Least Squares:** Minimizes error between predicted vs measured relative vectors
+- **Anchoring Transformation:** Aligns solution to ground truth anchor positions
+
+#### 5. **State Management & Output**
+```
+PGOResult → Global State
+├── user_position: np.ndarray [x,y,z] (latest phone position)
+├── data: Dict[int, BinnedData] (per-phone binned data)
+└── JSON logging of position updates and metrics
+```
+
+### Key System Characteristics
+
+- **Real-time Processing:** Continuous 1-second sliding windows
+- **Distributed Architecture:** MQTT enables loose coupling between anchors and server
+- **Robust Optimization:** Handles noisy UWB measurements through statistical aggregation
+- **Coordinate Systems:** Transforms from multiple local anchor frames to global room coordinates
+- **Extensible:** Clean separation allows easy addition of new processing stages or outputs
+
+### Configuration & Ground Truth
+- **Room Dimensions:**480cm × 600cm
+- **Anchor Heights:** All at 239cm (2.39m) from floor
+- **Anchor Positions:**
+  - Anchor 0: [480, 600, 239] (top-right)
+  - Anchor 1: [0, 600, 239] (top-left)
+  - Anchor 2: [480, 0, 239] (bottom-right)
+  - Anchor 3: [0, 0, 239] (bottom-left, origin)
 
 ---
+
 
 ## 📦 Packages (what each does)
 
@@ -91,53 +253,7 @@ python Demos/Follow_me_audio/run.py
 
 > If you use `uv`, the same commands work with `uv run …`
 
----
-
-## 🧠 High‑Level Data & Control Flow (Mermaid)
-
-```mermaid
-flowchart LR
-  subgraph Clients [RPi Clients]
-    C0[Client 0] -->|UWB measurement| MQTTC[(MQTT Broker)]
-    C1[Client 1] -->|UWB measurement| MQTTC
-  end
-
-  MQTTC -->|subscribe| S[Server Bring-up]
-  S -->|bin 1s windows\navg per anchor| L[localization-algos]
-  L -->|edges (anchor→phone)| PGO[PGO Solver]
-  PGO -->|graph solution\n(global positions)| OUT[Outputs]
-
-  subgraph Outputs
-    R[Basic_render_graph]:::demo
-    F[Follow_me_audio]:::demo
-    A[Adaptive_audio]:::demo
-  end
-
-  OUT --> R
-  OUT --> F
-  OUT --> A
-
-  classDef demo fill:#eef,stroke:#99f;
-```
-
----
 
 ## 📚 Reference Repositories
-
-| Repo | Scope / What it’s for | Link |
-|---|---|---|
-| **Embedded Firmware** | Low‑level firmware for the hardware platform | https://github.com/Hong-yiii/location_intelligence_embedded |
-| **RPI Code** | RPi‑side code for Murata 2BP UWB module | https://github.com/jionggg/bang-olufsen_rpi |
 | **UWB Phone App** | iPhone app for UWB module control & tests | https://github.com/Hong-yiii/Bang_and_olufsen_UWB_Testing |
-| **Evals/Data Collections** | (TBD) iPhone‑side eval/data capture | TODO |
-| **MQTT Topics** | Topic conventions (reference) | https://github.com/anitej1/UWB-MQTT |
-| **Optimisation Code** | Global grid coordinates + middleware demos | https://github.com/jionggg/location_intelligence_optimisation |
 
----
-
-## ✅ TL;DR
-
-- **Bring‑ups** start device roles and wire MQTT + state.  
-- **Packages** are pure and reused across demos.  
-- **Demos** visualize or sonify the solver outputs.  
-- **Order**: Server → Clients → Demo.

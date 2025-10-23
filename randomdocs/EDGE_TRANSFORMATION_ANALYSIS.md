@@ -26,15 +26,15 @@ def create_anchor_anchor_edges(anchor_config: AnchorConfig):
 **Input**: Ground truth positions in **GLOBAL room coordinates**
 ```python
 self.true_nodes = {
-    0: np.array([440, 550, 239]),  # Already global (x, y, z) in cm
-    1: np.array([0, 550, 239]),
-    2: np.array([440, 0, 239]),
+    0: np.array([480, 600, 239]),  # Already global (x, y, z) in cm
+    1: np.array([0, 600, 239]),
+    2: np.array([480, 0, 239]),
     3: np.array([0, 0, 239])
 }
 ```
 
 **Output**: Vectors already in **GLOBAL frame**
-- Example: `anchor_0 → anchor_1` = `(0-440, 550-550, 239-239)` = `(-440, 0, 0)` cm
+- Example: `anchor_0 → anchor_1` = `(0-480, 600-600, 239-239)` = `(-480, 0, 0)` cm
 
 **Transformation**: ❌ **NONE** (positions already global)
 
@@ -71,7 +71,7 @@ ANCHOR_R[0] = Rz(225°) @ Ry(+45°)  # Sensor tilted 45° down, facing SW
 
 1. **Anchor Positions**: 
    - Measured/specified in global room coordinates
-   - Example: "Anchor 0 is at position (440, 550, 239) cm in the room"
+   - Example: "Anchor 0 is at position (480, 600, 239) cm in the room"
    - NO transformation needed
 
 2. **UWB Measurements**:
@@ -109,9 +109,9 @@ Think of it like this:
 ```
 All edges in PGO graph are in GLOBAL FRAME:
 
-    Anchor_0 (440, 550, 239)
-         ●━━━━━━━━━━━━━━━━━━━━━━●  Anchor_1 (0, 550, 239)
-         ┃  vector: (-440,0,0)  ┃
+    Anchor_0 (480, 600, 239)
+         ●━━━━━━━━━━━━━━━━━━━━━━●  Anchor_1 (0, 600, 239)
+         ┃  vector: (-480,0,0)  ┃
          ┃                       ┃
          ┃    📱 Phone           ┃
          ┃    ╲  ╱ ╲  ╱         ┃
@@ -169,10 +169,10 @@ for from_node, to_node, vec in self._anchor_edges:
     print(f"  {from_node} → {to_node}: {vec}")
 
 # Expected output (12 edges):
-# anchor_0 → anchor_1: [-440.   0.   0.]
-# anchor_1 → anchor_0: [ 440.   0.   0.]
-# anchor_0 → anchor_2: [  0. -550.   0.]
-# anchor_2 → anchor_0: [  0. 550.   0.]
+# anchor_0 → anchor_1: [-480.   0.   0.]
+# anchor_1 → anchor_0: [ 480.   0.   0.]
+# anchor_0 → anchor_2: [  0. -600.   0.]
+# anchor_2 → anchor_0: [  0. 600.   0.]
 # ... etc
 ```
 

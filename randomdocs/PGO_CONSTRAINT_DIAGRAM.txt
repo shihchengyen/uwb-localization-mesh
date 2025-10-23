@@ -6,7 +6,7 @@
 │                        STAGE 1: GRAPH CONSTRUCTION                          │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-    Anchor_0 (440, 550, 239)          Anchor_1 (0, 550, 239)
+    Anchor_0 (480, 600, 239)          Anchor_1 (0, 600, 239)
          ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●
          ┃ ╲                          ╱ ┃
          ┃   ╲                      ╱   ┃
@@ -24,7 +24,7 @@
          ┃   ╱                      ╲   ┃
          ┃ ╱                          ╲ ┃
          ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●
-    Anchor_2 (440, 0, 239)            Anchor_3 (0, 0, 239)
+    Anchor_2 (480, 0, 239)            Anchor_3 (0, 0, 239)
     
     ━━━ = Anchor-Anchor Edges (12 bidirectional, ground truth vectors)
     ╲ ╱ = Phone-Anchor Edges (up to 4, measured from UWB)
@@ -101,7 +101,7 @@ Step 4: HARD ANCHOR FIXING
 │                      FINAL RESULT: ZERO DRIFT                               │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-    True_A0 (440, 550, 239)       True_A1 (0, 550, 239)
+    True_A0 (480, 600, 239)       True_A1 (0, 600, 239)
          ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●
          ┃                              ┃
          ┃           📱                 ┃
@@ -110,7 +110,7 @@ Step 4: HARD ANCHOR FIXING
          ┃                              ┃    with ZERO drift
          ┃                              ┃
          ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●
-    True_A2 (440, 0, 239)         True_A3 (0, 0, 239)
+    True_A2 (480, 0, 239)         True_A3 (0, 0, 239)
 
     ✅ Anchors at EXACT ground truth positions
     ✅ Phone position in GLOBAL room frame
