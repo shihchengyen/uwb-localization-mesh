@@ -9,7 +9,7 @@ import threading
 import time
 from collections import defaultdict
 from queue import Queue
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 import numpy as np
 
@@ -137,28 +137,44 @@ class ServerBringUp:
     def _handle_measurement(self, measurement: Measurement):
         """
         Callback from MQTT server for new measurements.
-        Adds to both queue and binner.
+        Adds to both queue and binner after validation.
         """
-        # Add to binner
+        # Add to binner (with filtering)
         binner = self._get_or_create_binner(measurement.phone_node_id)
-        binner.add_measurement(measurement)
+        was_added = binner.add_measurement(measurement)
         
-        # Also queue for processing
-        with self._measurements_lock:
-            self._measurements[measurement.phone_node_id].put(measurement)
-            
+        # Only queue for processing if it was accepted
+        if was_added:
+            with self._measurements_lock:
+                self._measurements[measurement.phone_node_id].put(measurement)
+        
         # Log metrics periodically
         metrics = binner.get_metrics()
-        if metrics.total_measurements % 100 == 0:  # Every 100 measurements
+        total_processed = metrics.total_measurements + metrics.rejected_measurements + metrics.late_drops
+        
+        if total_processed % 100 == 0:  # Every 100 measurements processed
             logger.info(json.dumps({
                 "event": "binning_metrics",
                 "phone_id": measurement.phone_node_id,
                 "metrics": {
+                    "accepted": metrics.total_measurements,
+                    "rejected": metrics.rejected_measurements,
                     "late_drops": metrics.late_drops,
-                    "total": metrics.total_measurements,
+                    "rejection_rate": f"{100 * metrics.rejected_measurements / total_processed:.1f}%",
+                    "rejection_reasons": metrics.rejection_reasons,
                     "per_anchor": metrics.measurements_per_anchor,
                     "window_span": metrics.window_span_sec
                 }
+            }))
+        
+        # Log individual rejections for debugging (can be disabled later)
+        if not was_added and metrics.rejected_measurements <= 50:  # Log first 50 rejections
+            logger.debug(json.dumps({
+                "event": "measurement_rejected",
+                "phone_id": measurement.phone_node_id,
+                "anchor_id": measurement.anchor_id,
+                "rejection_count": metrics.rejected_measurements,
+                "distance": float(np.linalg.norm(measurement.local_vector))
             }))
             
     def _process_measurements(self):
@@ -210,7 +226,7 @@ class ServerBringUp:
                         #     # Use non-jittered edges
                         #     temp_anchor_edges = self._anchor_edges
 
-                        nodes = {
+                        nodes: Dict[str, Optional[np.ndarray]] = {
                             # Start with floating anchors
                             'anchor_0': None,
                             'anchor_1': None,
