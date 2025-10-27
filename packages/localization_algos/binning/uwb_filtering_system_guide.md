@@ -142,6 +142,55 @@ graph LR
 
 ---
 
+## Architecture Integration
+
+### Server Classes Architecture
+
+The filtering system is integrated differently across server classes:
+
+#### Base ServerBringUp (Filtered Only)
+```python
+class ServerBringUp:
+    def __init__(self):
+        # Only filtered binners for PGO processing
+        self._filtered_binners: Dict[int, SlidingWindowBinner] = {}
+
+    def _handle_measurement(self, measurement: Measurement):
+        # Add to filtered binner for PGO processing
+        filtered_binner = self._get_or_create_filtered_binner(measurement.phone_node_id)
+        if filtered_binner.add_measurement(measurement):
+            # Queue for PGO processing
+            self._measurements[measurement.phone_node_id].put(measurement)
+```
+
+#### DataCollectionServer (Dual Binners)
+```python
+class DataCollectionServer(ServerBringUp):  # Extends ServerBringUp
+    def __init__(self):
+        super().__init__()
+        # Adds raw binners for complete data preservation
+        self._raw_binners: Dict[int, SlidingWindowBinner] = {}
+
+    def _handle_measurement(self, measurement: Measurement):
+        # Always add to raw binner (no filtering)
+        raw_binner = self._get_or_create_raw_binner(measurement.phone_node_id)
+        raw_binner.add_measurement_raw(measurement)
+
+        # Call parent for filtered processing
+        super()._handle_measurement(measurement)
+```
+
+### Data Flow Comparison
+
+| Component | ServerBringUp | DataCollectionServer |
+|-----------|---------------|---------------------|
+| **Filtered Binners** | ✅ PGO Processing | ✅ PGO Processing |
+| **Raw Binners** | ❌ Not needed | ✅ Complete logging |
+| **CSV Export** | ❌ N/A | ✅ Both filtered + raw data |
+| **Use Case** | Production positioning | Research & analysis |
+
+---
+
 ## Configuration Parameters
 
 ### Default Configuration
