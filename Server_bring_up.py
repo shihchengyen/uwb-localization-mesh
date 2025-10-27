@@ -75,13 +75,13 @@ class ServerBringUp:
         self._measurements_lock = threading.Lock()
         self._measurements: Dict[int, Queue[Measurement]] = defaultdict(Queue)
         
-        # Binning system (one per phone)
+        # Binning system (one per phone) - filtered binners for PGO processing
         self._binners_lock = threading.Lock()
-        self._binners: Dict[int, SlidingWindowBinner] = {}
-        
+        self._filtered_binners: Dict[int, SlidingWindowBinner] = {}
+
         # PGO solver
         self._pgo_solver = PGOSolver()
-        
+
         # Pre-compute anchor-anchor edges
         self._anchor_edges = create_anchor_anchor_edges(self.anchor_config)
         
@@ -104,14 +104,14 @@ class ServerBringUp:
             "window_size": window_size_seconds
         }))
         
-    def _get_or_create_binner(self, phone_id: int) -> SlidingWindowBinner:
-        """Thread-safe access to per-phone binners."""
+    def _get_or_create_filtered_binner(self, phone_id: int) -> SlidingWindowBinner:
+        """Thread-safe access to per-phone filtered binners (for PGO processing)."""
         with self._binners_lock:
-            if phone_id not in self._binners:
-                self._binners[phone_id] = SlidingWindowBinner(
+            if phone_id not in self._filtered_binners:
+                self._filtered_binners[phone_id] = SlidingWindowBinner(
                     window_size_seconds=self.window_size_seconds
                 )
-            return self._binners[phone_id]
+            return self._filtered_binners[phone_id]
         
     def start(self):
         """Start the server and processing thread."""
@@ -137,43 +137,46 @@ class ServerBringUp:
     def _handle_measurement(self, measurement: Measurement):
         """
         Callback from MQTT server for new measurements.
-        Adds to both queue and binner after validation.
+        Adds to filtered binner for PGO processing.
+        Only filtered measurements are queued for PGO processing.
         """
-        # Add to binner (with filtering)
-        binner = self._get_or_create_binner(measurement.phone_node_id)
-        was_added = binner.add_measurement(measurement)
+        # Add to filtered binner for PGO processing
+        filtered_binner = self._get_or_create_filtered_binner(measurement.phone_node_id)
+        was_added_filtered = filtered_binner.add_measurement(measurement)
         
         # Only queue for processing if it was accepted
-        if was_added:
+        if was_added_filtered:
             with self._measurements_lock:
                 self._measurements[measurement.phone_node_id].put(measurement)
-        
-        # Log metrics periodically
-        metrics = binner.get_metrics()
-        total_processed = metrics.total_measurements + metrics.rejected_measurements + metrics.late_drops
-        
+
+        # Log metrics periodically from filtered binner
+        filtered_metrics = filtered_binner.get_metrics()
+        total_processed = (filtered_metrics.total_measurements +
+                          filtered_metrics.rejected_measurements +
+                          filtered_metrics.late_drops)
+
         if total_processed % 100 == 0:  # Every 100 measurements processed
             logger.info(json.dumps({
                 "event": "binning_metrics",
                 "phone_id": measurement.phone_node_id,
                 "metrics": {
-                    "accepted": metrics.total_measurements,
-                    "rejected": metrics.rejected_measurements,
-                    "late_drops": metrics.late_drops,
-                    "rejection_rate": f"{100 * metrics.rejected_measurements / total_processed:.1f}%",
-                    "rejection_reasons": metrics.rejection_reasons,
-                    "per_anchor": metrics.measurements_per_anchor,
-                    "window_span": metrics.window_span_sec
+                    "accepted": filtered_metrics.total_measurements,
+                    "rejected": filtered_metrics.rejected_measurements,
+                    "late_drops": filtered_metrics.late_drops,
+                    "rejection_rate": f"{100 * filtered_metrics.rejected_measurements / total_processed:.1f}%",
+                    "rejection_reasons": filtered_metrics.rejection_reasons,
+                    "per_anchor": filtered_metrics.measurements_per_anchor,
+                    "window_span": filtered_metrics.window_span_sec
                 }
             }))
-        
+
         # Log individual rejections for debugging (can be disabled later)
-        if not was_added and metrics.rejected_measurements <= 50:  # Log first 50 rejections
+        if not was_added_filtered and filtered_metrics.rejected_measurements <= 50:  # Log first 50 rejections
             logger.debug(json.dumps({
                 "event": "measurement_rejected",
                 "phone_id": measurement.phone_node_id,
                 "anchor_id": measurement.anchor_id,
-                "rejection_count": metrics.rejected_measurements,
+                "rejection_count": filtered_metrics.rejected_measurements,
                 "distance": float(np.linalg.norm(measurement.local_vector))
             }))
             
@@ -189,9 +192,9 @@ class ServerBringUp:
                     phone_ids = list(self._measurements.keys())
                     
                 for phone_id in phone_ids:
-                    # Get binned data
-                    binner = self._get_or_create_binner(phone_id)
-                    binned = binner.create_binned_data(phone_id)
+                    # Get filtered binned data for PGO processing
+                    filtered_binner = self._get_or_create_filtered_binner(phone_id)
+                    binned = filtered_binner.create_binned_data(phone_id)
                     
                     if binned:
                         # Update state

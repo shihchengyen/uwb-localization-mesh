@@ -17,7 +17,8 @@ from rich.prompt import Prompt, FloatPrompt, IntPrompt
 from rich.table import Table
 from rich.text import Text
 
-from packages.datatypes.datatypes import BinnedData
+from packages.datatypes.datatypes import Measurement, BinnedData
+from packages.localization_algos.binning.sliding_window import SlidingWindowBinner
 from packages.uwb_mqtt_server.config import MQTTConfig
 from Server_bring_up import ServerBringUp
 
@@ -63,7 +64,10 @@ class DataCollectionServer(ServerBringUp):
 
         # Initialize base server
         super().__init__(mqtt_config, window_size_seconds)
-        
+
+        # Initialize raw binners for complete data logging/analysis
+        self._raw_binners: Dict[int, SlidingWindowBinner] = {}
+
         # Setup data storage
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -72,12 +76,37 @@ class DataCollectionServer(ServerBringUp):
         self.variance_file = self.data_dir / "variance.csv"
         
         self._init_csv_files()
-        
+
         # Add command processing thread
         self._command_thread = threading.Thread(
             target=self._process_commands,
             daemon=True
         )
+
+    def _get_or_create_raw_binner(self, phone_id: int) -> SlidingWindowBinner:
+        """Thread-safe access to per-phone raw binners (for logging/analysis)."""
+        with self._binners_lock:
+            if phone_id not in self._raw_binners:
+                # Raw binner uses same window size but no filtering parameters
+                self._raw_binners[phone_id] = SlidingWindowBinner(
+                    window_size_seconds=self.window_size_seconds,
+                    outlier_threshold_sigma=float('inf'),  # Disable filtering
+                    max_anchor_variance=float('inf')       # Disable variance check
+                )
+            return self._raw_binners[phone_id]
+
+    # Default behaviour in server_bringup doesn't instatiate the raw data collection hence handling is done here
+    def _handle_measurement(self, measurement: Measurement):
+        """
+        Override base class to handle both filtered and raw data collection.
+        Filtered data goes to PGO, raw data goes to logging/analysis.
+        """
+        # Always add to raw binner for complete data logging
+        raw_binner = self._get_or_create_raw_binner(measurement.phone_node_id)
+        raw_binner.add_measurement_raw(measurement)
+
+        # Call parent implementation for filtered binner processing
+        super()._handle_measurement(measurement)
     
     @staticmethod
     def _binned_data_to_json_dict(binned_data: BinnedData) -> dict:
@@ -193,6 +222,19 @@ class DataCollectionServer(ServerBringUp):
         
         # Save to CSV
         timestamp = datetime.utcnow().timestamp()
+
+        # Get both filtered and raw binned data
+        filtered_binned = latest_binned
+
+        # Get phone_id from the binned data
+        phone_id = latest_binned.phone_node_id
+
+        # Get raw binned data from the raw binner
+        raw_binned = None
+        if phone_id in self._raw_binners:
+            raw_binner = self._raw_binners[phone_id]
+            raw_binned = raw_binner.create_binned_data(phone_id)
+
         with open(self.datapoints_file, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -200,7 +242,8 @@ class DataCollectionServer(ServerBringUp):
                 ground_truth[0], ground_truth[1], ground_truth[2],
                 pgo_measurement[0], pgo_measurement[1], pgo_measurement[2],
                 orientation,
-                json.dumps(self._binned_data_to_json_dict(latest_binned))
+                json.dumps(self._binned_data_to_json_dict(filtered_binned)) if filtered_binned else "{}",
+                json.dumps(self._binned_data_to_json_dict(raw_binned)) if raw_binned else "{}"
             ])
             
         return pgo_measurement, latest_binned
