@@ -9,15 +9,34 @@ from typing import Dict, List
 
 # Import the transformation functions from the localization package
 import sys
-sys.path.append(str(Path(__file__).parent.parent / 'packages'))
+sys.path.append(str(Path(__file__).parent.parent.parent.parent / 'packages'))
 from localization_algos.edge_creation.transforms import ANCHOR_R
 
-def extract_row_data(csv_path, row_index=9):
-    """Extract data from specified row of the CSV file."""
+def extract_row_data(csv_path, row_index=None, position_filter=None):
+    """Extract data from specified row of the CSV file or all rows for a position."""
     df = pd.read_csv(csv_path)
 
-    # Row index in DataFrame (pandas is 0-indexed and there's a header)
-    row_data = df.iloc[row_index]
+    # Filter by position if specified
+    if position_filter:
+        df = df[df['orientation'] == position_filter]
+        if df.empty:
+            print(f"No data found for position {position_filter}")
+            return None, None, None
+
+    # If position filter is used, analyze the first row or a specific row index
+    if position_filter and row_index is None:
+        row_index = 0  # Use first row of filtered data
+
+    if row_index is not None:
+        # Row index in DataFrame (pandas is 0-indexed and there's a header)
+        if position_filter:
+            # row_index is relative to the filtered dataframe
+            row_data = df.iloc[row_index]
+        else:
+            row_data = df.iloc[row_index]
+    else:
+        # If no row_index specified and no position filter, use first row
+        row_data = df.iloc[0]
 
     ground_truth = np.array([
         row_data['ground_truth_x'],
@@ -72,7 +91,7 @@ def calculate_node_positions(binned_data):
 
     return node_positions
 
-def plot_node_quality(ground_truth, pgo_result, node_positions, row_index):
+def plot_node_quality(ground_truth, pgo_result, node_positions, row_index, row_identifier="default"):
     """
     Create plots showing the quality comparison between nodes, ground truth, and PGO.
     """
@@ -182,7 +201,7 @@ def plot_node_quality(ground_truth, pgo_result, node_positions, row_index):
     plt.tight_layout()
 
     # Save the plot
-    output_path = Path(__file__).parent / 'Data' / f'node_quality_analysis_row{row_index + 1}.png'
+    output_path = Path(__file__).parent.parent / f'node_quality_analysis_{row_identifier}.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"Plot saved to: {output_path}")
 
@@ -209,7 +228,7 @@ def print_analysis_summary(ground_truth, pgo_result, node_positions, row_index):
         print(f"  Position: ({position[0]:.1f}, {position[1]:.1f}, {position[2]:.1f})")
         print(f"  Errors: X={x_err:.1f}, Y={y_err:.1f}, Z={z_err:.1f}, Total={error:.1f} cm")
 
-def create_detailed_measurement_plot(binned_data, node_positions, ground_truth, pgo_result, row_index):
+def create_detailed_measurement_plot(binned_data, node_positions, ground_truth, pgo_result, row_index, row_identifier="default"):
     """Create plots showing measurements in both local and global coordinate systems."""
     # Define anchor positions (from Server_bring_up.md)
     anchor_positions = {
@@ -295,13 +314,13 @@ def create_detailed_measurement_plot(binned_data, node_positions, ground_truth, 
     # Save both plots
     plt.figure(fig_local.number)
     plt.tight_layout()
-    output_path_local = Path(__file__).parent / 'Data' / f'local_measurements_row{row_index + 1}.png'
+    output_path_local = Path(__file__).parent.parent / f'local_measurements_{row_identifier}.png'
     plt.savefig(output_path_local, dpi=300, bbox_inches='tight')
     print(f"Local measurements plot saved to: {output_path_local}")
 
     plt.figure(fig_global.number)
     plt.tight_layout()
-    output_path_global = Path(__file__).parent / 'Data' / f'global_measurements_row{row_index + 1}.png'
+    output_path_global = Path(__file__).parent.parent / f'global_measurements_{row_identifier}.png'
     plt.savefig(output_path_global, dpi=300, bbox_inches='tight')
     print(f"Global measurements plot saved to: {output_path_global}")
 
@@ -310,28 +329,56 @@ def create_detailed_measurement_plot(binned_data, node_positions, ground_truth, 
     plt.close(fig_global)
 
 if __name__ == "__main__":
-    # Path to the data file
-    data_path = Path(__file__).parent / "Data" / "datapoints(unsure).csv"
+    import argparse
 
-    print(f"Analyzing data from: {data_path}")
+    parser = argparse.ArgumentParser(description='Analyze node quality for positioning data')
+    parser.add_argument('csv_path', help='Path to the CSV file')
+    parser.add_argument('--position', '-p', help='Filter by position (A, B, C, etc.)', default=None)
+    parser.add_argument('--row', '-r', type=int, help='Row index to analyze (0-indexed)', default=None)
 
-    # Extract data from the row with ground truth (240.0, 300.0, 150.0) - index 3
-    row_index = 3  # This corresponds to the row with the correct data points
-    ground_truth, pgo_result, binned_data = extract_row_data(data_path, row_index)
+    args = parser.parse_args()
+
+    csv_path = Path(args.csv_path)
+    if not csv_path.exists():
+        print(f"CSV file not found: {csv_path}")
+        sys.exit(1)
+
+    print(f"Analyzing data from: {csv_path}")
+    if args.position:
+        print(f"Filtering by position: {args.position}")
+    if args.row is not None:
+        print(f"Analyzing row index: {args.row}")
+
+    # Extract data
+    ground_truth, pgo_result, binned_data = extract_row_data(str(csv_path), args.row, args.position)
+
+    if ground_truth is None:
+        print("No data found for the specified filter")
+        sys.exit(1)
 
     # Calculate node positions from measurements
     node_positions = calculate_node_positions(binned_data)
 
+    # Determine row identifier for output files
+    if args.position:
+        row_identifier = f"position_{args.position}"
+        if args.row is not None:
+            row_identifier += f"_row{args.row + 1}"
+        else:
+            row_identifier += "_first_row"
+    else:
+        row_identifier = f"row{(args.row + 1) if args.row is not None else 1}"
+
     # Create main analysis plot
-    fig = plot_node_quality(ground_truth, pgo_result, node_positions, row_index)
+    fig = plot_node_quality(ground_truth, pgo_result, node_positions, 0, row_identifier)  # Use 0 as row index for display
 
     # Create detailed measurements plot
-    create_detailed_measurement_plot(binned_data, node_positions, ground_truth, pgo_result, row_index)
+    create_detailed_measurement_plot(binned_data, node_positions, ground_truth, pgo_result, 0, row_identifier)
 
     # Print analysis summary
-    print_analysis_summary(ground_truth, pgo_result, node_positions, row_index)
+    print_analysis_summary(ground_truth, pgo_result, node_positions, 0)
 
     print("\nPlots generated successfully!")
-    print(f"- node_quality_analysis_row{row_index + 1}.png: Main quality comparison")
-    print(f"- local_measurements_row{row_index + 1}.png: Individual measurements in local coordinates")
-    print(f"- global_measurements_row{row_index + 1}.png: All measurements transformed to global coordinates")
+    print(f"- node_quality_analysis_{row_identifier}.png: Main quality comparison")
+    print(f"- local_measurements_{row_identifier}.png: Individual measurements in local coordinates")
+    print(f"- global_measurements_{row_identifier}.png: All measurements transformed to global coordinates")

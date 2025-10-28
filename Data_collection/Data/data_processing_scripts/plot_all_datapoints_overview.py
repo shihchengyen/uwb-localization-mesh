@@ -6,13 +6,13 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 from pathlib import Path
 from typing import Dict, List
+import sys
 
 # Import the transformation functions from the localization package
-import sys
 sys.path.append(str(Path(__file__).parent.parent.parent.parent / 'packages'))
 from localization_algos.edge_creation.transforms import ANCHOR_R
 
-def plot_all_datapoints_overview(csv_path):
+def plot_all_datapoints_overview(csv_path, position_filter=None):
     """Create a comprehensive plot showing all data points from the CSV file."""
     # Define anchor positions (from Server_bring_up.md)
     anchor_positions = {
@@ -24,6 +24,13 @@ def plot_all_datapoints_overview(csv_path):
 
     # Read CSV file
     df = pd.read_csv(csv_path)
+
+    # Filter by position if specified
+    if position_filter:
+        df = df[df['orientation'] == position_filter]
+        if df.empty:
+            print(f"No data found for position {position_filter}")
+            return None
 
     # Create figure
     fig, ax = plt.subplots(1, 1, figsize=(16, 12))
@@ -108,15 +115,17 @@ def plot_all_datapoints_overview(csv_path):
 
     return fig
 
-if __name__ == "__main__":
-    # Use the most recent datapoints file
-    data_dir = Path(__file__).parent.parent
-    csv_path = data_dir / "datapoints.csv"
-
-def plot_filtering_metrics(csv_path):
+def plot_filtering_metrics(csv_path, position_filter=None):
     """Create a plot showing filtering metrics over time."""
     # Read CSV file
     df = pd.read_csv(csv_path)
+
+    # Filter by position if specified
+    if position_filter:
+        df = df[df['orientation'] == position_filter]
+        if df.empty:
+            print(f"No data found for position {position_filter}")
+            return None
 
     # Create figure with subplots for different metrics
     fig, axes = plt.subplots(3, 1, figsize=(12, 10))
@@ -157,13 +166,26 @@ def plot_filtering_metrics(csv_path):
     return fig
 
 if __name__ == "__main__":
-    # Use the most recent datapoints file
-    data_dir = Path(__file__).parent.parent
-    csv_path = data_dir / "datapoints.csv"
+    import argparse
 
-    if csv_path.exists():
-        print(f"Processing {csv_path}")
-        plot_all_datapoints_overview(str(csv_path))
-        plot_filtering_metrics(str(csv_path))
-    else:
+    parser = argparse.ArgumentParser(description='Generate data processing plots')
+    parser.add_argument('csv_path', help='Path to the CSV file')
+    parser.add_argument('--position', '-p', help='Filter by position (A, B, C, etc.)', default=None)
+
+    args = parser.parse_args()
+
+    csv_path = Path(args.csv_path)
+    if not csv_path.exists():
         print(f"CSV file not found: {csv_path}")
+        sys.exit(1)
+
+    print(f"Processing {csv_path} with position filter: {args.position}")
+
+    # Generate plots
+    fig1 = plot_all_datapoints_overview(str(csv_path), args.position)
+    fig2 = plot_filtering_metrics(str(csv_path), args.position)
+
+    if fig1 is not None and fig2 is not None:
+        print("Plots generated successfully!")
+    else:
+        print("No data found for the specified filter")

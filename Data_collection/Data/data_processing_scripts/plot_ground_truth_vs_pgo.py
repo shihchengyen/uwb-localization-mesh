@@ -11,7 +11,7 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent.parent.parent / 'packages'))
 from localization_algos.edge_creation.transforms import ANCHOR_R
 
-def load_and_plot_data_with_anchors(csv_path):
+def load_and_plot_data_with_anchors(csv_path, position_filter=None):
     """
     Load data from CSV and create plots comparing ground truth vs PGO positions
     with individual anchor measurements in global coordinates.
@@ -26,6 +26,13 @@ def load_and_plot_data_with_anchors(csv_path):
 
     # Read CSV file
     df = pd.read_csv(csv_path)
+
+    # Filter by position if specified
+    if position_filter:
+        df = df[df['orientation'] == position_filter]
+        if df.empty:
+            print(f"No data found for position {position_filter}")
+            return None, None
 
     # Extract relevant columns
     ground_truth_x = df['ground_truth_x'].values
@@ -147,7 +154,7 @@ def load_and_plot_data_with_anchors(csv_path):
     plt.tight_layout()
 
     # Save the plot
-    output_path = csv_path.parent / 'ground_truth_vs_pgo_with_anchors.png'
+    output_path = Path(csv_path).parent / 'ground_truth_vs_pgo_with_anchors.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"Plot saved to: {output_path}")
 
@@ -172,11 +179,18 @@ def load_and_plot_data_with_anchors(csv_path):
 
     return fig, df
 
-def create_individual_plots(csv_path):
+def create_individual_plots(csv_path, position_filter=None):
     """
     Create separate individual plots for better detail.
     """
     df = pd.read_csv(csv_path)
+
+    # Filter by position if specified
+    if position_filter:
+        df = df[df['orientation'] == position_filter]
+        if df.empty:
+            print(f"No data found for position {position_filter}")
+            return
     ground_truth_x = df['ground_truth_x'].values
     ground_truth_y = df['ground_truth_y'].values
     pgo_x = df['pgo_x'].values
@@ -223,17 +237,32 @@ def create_individual_plots(csv_path):
     plt.close()
 
 if __name__ == "__main__":
-    # Path to the data file
-    data_path = Path(__file__).parent.parent / "datapoints.csv"
+    import argparse
 
-    print(f"Loading data from: {data_path}")
+    parser = argparse.ArgumentParser(description='Generate ground truth vs PGO comparison plots')
+    parser.add_argument('csv_path', help='Path to the CSV file')
+    parser.add_argument('--position', '-p', help='Filter by position (A, B, C, etc.)', default=None)
+
+    args = parser.parse_args()
+
+    csv_path = Path(args.csv_path)
+    if not csv_path.exists():
+        print(f"CSV file not found: {csv_path}")
+        sys.exit(1)
+
+    print(f"Loading data from: {csv_path}")
+    if args.position:
+        print(f"Filtering by position: {args.position}")
 
     # Create comprehensive comparison plot with anchor measurements
-    fig, df = load_and_plot_data_with_anchors(data_path)
+    fig, df = load_and_plot_data_with_anchors(str(csv_path), args.position)
 
-    print("\nPlot generated successfully!")
-    print("- ground_truth_vs_pgo_with_anchors.png: Ground truth vs estimated positions")
-    print("  (X and Y comparisons with PGO results and individual anchor measurements)")
+    if fig is not None:
+        print("\nPlot generated successfully!")
+        print("- ground_truth_vs_pgo_with_anchors.png: Ground truth vs estimated positions")
+        print("  (X and Y comparisons with PGO results and individual anchor measurements)")
+    else:
+        print("No data found for the specified filter")
 
     # Don't show plot interactively (for headless environments)
     # plt.show()  # Uncomment if running in an environment with display
