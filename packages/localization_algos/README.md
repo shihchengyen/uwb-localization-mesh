@@ -24,57 +24,104 @@ edges = create_anchor_anchor_edges(anchor_config)
 ```
 
 ### binning/
-Time-window based measurement processing with filtering:
-- Sliding window implementation
-- Late data handling
-- Statistical outlier filtering (z-score based)
-- Bin variance filtering
-- Performance metrics
+Dual-binner system for parallel filtered and raw data processing:
+- **Filtered binner**: Quality-controlled data for PGO positioning
+- **Raw binner**: Complete unfiltered data for logging/analysis
+- Sliding window implementation with temporal self-healing
+- Statistical outlier detection and variance control
 
 ```python
 from localization_algos.binning import SlidingWindowBinner
 
-# Create binner with filtering
-binner = SlidingWindowBinner(
-    window_size_seconds=2.0,
-    outlier_threshold_sigma=2.5,        # Reject measurements >2.5σ from anchor cluster
-    min_samples_for_outlier_detection=4, # Need 4 samples before outlier filtering
-    max_anchor_variance=10000.0         # Reject measurements that would make anchor variance >10000 cm^2
+# Filtered binner (for PGO processing - applies quality filters)
+filtered_binner = SlidingWindowBinner(
+    window_size_seconds=2.0,        # 2-second sliding window
+    outlier_threshold_sigma=2.0,    # Reject measurements >2.0σ from cluster
+    min_samples_for_outlier_detection=5, # Need 5 samples before outlier filtering
+    max_anchor_variance=10000.0     # Max variance per anchor (cm²)
 )
 
-# Add measurements (returns True if accepted, False if rejected)
-was_added = binner.add_measurement(measurement)
+# Raw binner (for logging/analysis - accepts all measurements)
+raw_binner = SlidingWindowBinner(
+    window_size_seconds=2.0,
+    outlier_threshold_sigma=float('inf'),  # Disable filtering
+    max_anchor_variance=float('inf')       # Disable variance check
+)
 
-# Create binned data (aggregates remaining good measurements)
-binned_data = binner.create_binned_data(phone_node_id=1)
+# Add measurements to both binners
+measurement = get_uwb_measurement()
+
+# Filtered processing (returns True if accepted for PGO)
+was_accepted = filtered_binner.add_measurement(measurement)
+if was_accepted:
+    # Use for PGO positioning
+    binned_data = filtered_binner.create_binned_data(phone_id)
+    # ... PGO processing ...
+
+# Raw processing (always accepts for logging)
+raw_binner.add_measurement_raw(measurement)
+raw_binned_data = raw_binner.create_binned_data(phone_id)
+# ... logging/analysis ...
 
 # Get metrics
-metrics = binner.get_metrics()
-print(f"Accepted: {metrics.total_measurements}")
-print(f"Rejected: {metrics.rejected_measurements}")
-print(f"Reasons: {metrics.rejection_reasons}")
+filtered_metrics = filtered_binner.get_metrics()
+print(f"Accepted for PGO: {filtered_metrics.total_measurements}")
+print(f"Rejected by filters: {filtered_metrics.rejected_measurements}")
+print(f"Rejection reasons: {filtered_metrics.rejection_reasons}")
+
+raw_metrics = raw_binner.get_metrics()
+print(f"Total raw measurements: {len(raw_binner.measurements_buffer)}")
 ```
 
-#### Filtering Behavior
+#### Dual-Binner Architecture
 
-**All filtering happens during `add_measurement()` - bad data is never added to the buffer.**
+**Filtered Binner (PGO Processing):**
+- Applies statistical outlier detection
+- Performs per-anchor variance control
+- Only high-quality measurements reach PGO
+- Tracks rejection metrics and reasons
+
+**Raw Binner (Logging/Analysis):**
+- Accepts all valid measurements (no filtering)
+- Maintains complete data history
+- Used for debugging and post-processing analysis
+- No rejection metrics (everything is preserved)
+
+#### Filtering Logic
 
 **Statistical Outlier Detection:**
-- Maintains a cluster of recent measurements per anchor
-- Calculates z-score for each new measurement
-- Rejects if `|distance - mean| / std > outlier_threshold_sigma`
+- Maintains per-anchor cluster of recent measurements
+- Calculates z-score: `|distance - mean| / std_deviation`
+- Rejects if `z-score > outlier_threshold_sigma` (default: 2.0σ)
 - First `min_samples_for_outlier_detection` measurements always accepted
 
 **Per-Anchor Variance Control:**
-- Checks if adding measurement would make anchor's variance exceed `max_anchor_variance`
-- Calculates variance of distances for that anchor including the new measurement
+- Predictive variance checking before adding measurement
+- Calculates: `variance = var(existing_distances + new_distance)`
 - Rejects if `variance > max_anchor_variance`
-- Prevents anchors from having inconsistent measurements
+- Prevents anchor clusters from becoming too inconsistent
 
-**Default Values:**
-- `outlier_threshold_sigma=2.5` (rejects outer 1.2% tail)
-- `min_samples_for_outlier_detection=4`
-- `max_anchor_variance=10000.0` (100cm std deviation)
+**Temporal Self-Healing:**
+- Sliding window automatically removes old measurements
+- Bad data "ages out" over time
+- Anchors can automatically recover when conditions improve
+
+#### Usage in Server Classes
+
+**Base ServerBringUp (Filtered Only):**
+- Uses only filtered binners for production PGO processing
+- Lightweight, focused on positioning accuracy
+
+**DataCollectionServer (Dual Binners):**
+- Extends ServerBringUp with raw binners for complete data logging
+- Preserves all measurements for research and debugging
+- Exports both filtered and raw data to CSV
+
+#### Default Values
+- `window_size_seconds=2.0` (2-second sliding window)
+- `outlier_threshold_sigma=2.0` (rejects ~2.3% statistical outliers)
+- `min_samples_for_outlier_detection=5` (warm-up period)
+- `max_anchor_variance=10000.0` (100cm std deviation limit)
 
 ### pgo/
 Pose Graph Optimization solver:

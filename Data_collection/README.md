@@ -69,6 +69,34 @@ def collect_variance(
 
 The output of these will be appended with the time and simply added to a CSV.
 
+## Dual-Binner Data Collection
+
+The `DataCollectionServer` extends the base `ServerBringUp` with dual-binner functionality:
+
+- **Filtered Binner**: Quality-controlled data for PGO positioning (inherited from base)
+- **Raw Binner**: Complete unfiltered data for logging and analysis
+
+### CSV Export Format
+
+Data points are exported to CSV with both filtered and raw binned data:
+
+```csv
+timestamp,ground_truth_x,ground_truth_y,ground_truth_z,pgo_x,pgo_y,pgo_z,orientation,filtered_binned_data_json,raw_binned_data_json
+1761086998.505,0.0,0.0,150.0,60.9,25.4,-51.5,A,"{...filtered data...}","{...raw data...}"
+```
+
+### Binner Usage
+
+**Filtered Data (for PGO):**
+- Contains only measurements that passed quality filters
+- Used for position optimization
+- May have fewer measurements per anchor if some were filtered out
+
+**Raw Data (for Analysis):**
+- Contains ALL measurements received
+- Used for debugging and research
+- Includes rejected measurements for comparison studies
+
 
 ## Refresher on the BinnedData dataclass
 ```python

@@ -118,9 +118,9 @@ class ServerBringUp:
 self._measurements_lock = threading.Lock()
 self._measurements: Dict[int, Queue[Measurement]] = defaultdict(Queue)
 
-# Thread-safe binners
+# Thread-safe filtered binners (for PGO processing)
 self._binners_lock = threading.Lock()
-self._binners: Dict[int, SlidingWindowBinner] = {}
+self._filtered_binners: Dict[int, SlidingWindowBinner] = {}
 ```
 
 ### 3. Callback Chain

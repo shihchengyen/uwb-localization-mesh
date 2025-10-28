@@ -31,7 +31,7 @@ class SlidingWindowBinner:
         window_size_seconds: float = 2.0,
         outlier_threshold_sigma: float = 2.0,
         min_samples_for_outlier_detection: int = 5,
-        max_anchor_variance: float = 10000.0  # cm^2 per anchor
+        max_anchor_variance: float = 5000.0  # cm^2 per anchor
     ):
         """
         Initialize the binner.
@@ -62,21 +62,21 @@ class SlidingWindowBinner:
         """
         Add a new measurement to the buffer after validation.
         Drops measurements that are too old or fail validation filters.
-        
+
         Args:
             measurement: New measurement to add
-            
+
         Returns:
             True if measurement was added, False if rejected
         """
         current_time = time.time()
         window_start = current_time - self.window_size_seconds
-        
+
         # Check if measurement is too old
         if measurement.timestamp < window_start:
             self.metrics.late_drops += 1
             return False
-        
+
         # Validate measurement using filters
         is_valid, rejection_reason = self._validate_measurement(measurement)
         if not is_valid:
@@ -84,20 +84,48 @@ class SlidingWindowBinner:
             self.metrics.rejection_reasons[rejection_reason] = \
                 self.metrics.rejection_reasons.get(rejection_reason, 0) + 1
             return False
-            
+
         # Add to buffer
         self.measurements_buffer.append(measurement)
         self.metrics.total_measurements += 1
-        
+
         # Update per-anchor counts
         self.metrics.measurements_per_anchor[measurement.anchor_id] = \
             self.metrics.measurements_per_anchor.get(measurement.anchor_id, 0) + 1
-            
+
         # Remove old measurements
         while self.measurements_buffer and \
               self.measurements_buffer[0].timestamp < window_start:
             self.measurements_buffer.popleft()
-            
+
+        return True
+
+    def add_measurement_raw(self, measurement: Measurement) -> bool:
+        """
+        Add a raw measurement to the buffer WITHOUT any filtering.
+        Used for logging and analysis purposes - accepts all valid measurements.
+
+        Args:
+            measurement: New measurement to add
+
+        Returns:
+            True if measurement was added, False if too old
+        """
+        current_time = time.time()
+        window_start = current_time - self.window_size_seconds
+
+        # Check if measurement is too old (only filtering we do)
+        if measurement.timestamp < window_start:
+            return False
+
+        # Add to buffer without validation
+        self.measurements_buffer.append(measurement)
+
+        # Remove old measurements (no metrics tracking for raw binner)
+        while self.measurements_buffer and \
+              self.measurements_buffer[0].timestamp < window_start:
+            self.measurements_buffer.popleft()
+
         return True
             
     def create_binned_data(self, phone_node_id: int) -> Optional[BinnedData]:

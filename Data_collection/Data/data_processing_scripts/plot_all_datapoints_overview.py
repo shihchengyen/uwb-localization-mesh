@@ -6,13 +6,13 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 from pathlib import Path
 from typing import Dict, List
+import sys
 
 # Import the transformation functions from the localization package
-import sys
 sys.path.append(str(Path(__file__).parent.parent.parent.parent / 'packages'))
 from localization_algos.edge_creation.transforms import ANCHOR_R
 
-def plot_all_datapoints_overview(csv_path):
+def plot_all_datapoints_overview(csv_path, position_filter=None):
     """Create a comprehensive plot showing all data points from the CSV file."""
     # Define anchor positions (from Server_bring_up.md)
     anchor_positions = {
@@ -24,6 +24,13 @@ def plot_all_datapoints_overview(csv_path):
 
     # Read CSV file
     df = pd.read_csv(csv_path)
+
+    # Filter by position if specified
+    if position_filter:
+        df = df[df['orientation'] == position_filter]
+        if df.empty:
+            print(f"No data found for position {position_filter}")
+            return None
 
     # Create figure
     fig, ax = plt.subplots(1, 1, figsize=(16, 12))
@@ -53,9 +60,9 @@ def plot_all_datapoints_overview(csv_path):
         ax.scatter(pgo_result[0], pgo_result[1], color='purple', marker='s', s=150,
                   zorder=7, edgecolors='white', linewidth=2)
 
-        # Parse measurements and plot them
+        # Parse filtered measurements and plot them
         try:
-            binned_data = json.loads(row['binned_data_json'])
+            binned_data = json.loads(row['filtered_binned_data_json'])
             measurements = binned_data['measurements']
 
             for node_id_str, node_measurements in measurements.items():
@@ -97,7 +104,7 @@ def plot_all_datapoints_overview(csv_path):
     # Formatting
     ax.set_xlabel('Global X Position (cm)')
     ax.set_ylabel('Global Y Position (cm)')
-    ax.set_title('All Data Points Overview\nGround Truth, PGO Results, and Individual Node Measurements')
+    ax.set_title('All Data Points Overview\nGround Truth, PGO Results (from Filtered Data), and Filtered Node Measurements')
     ax.grid(True, alpha=0.3)
     ax.axis('equal')
 
@@ -108,156 +115,77 @@ def plot_all_datapoints_overview(csv_path):
 
     return fig
 
-def create_error_summary_plot(csv_path):
-    """Create a summary plot showing errors for all data points."""
-    # Define anchor positions
-    anchor_positions = {
-        0: np.array([480, 600, 0]),  # top-right
-        1: np.array([0, 600, 0]),    # top-left
-        2: np.array([480, 0, 0]),    # bottom-right
-        3: np.array([0, 0, 0])       # bottom-left
-    }
-
+def plot_filtering_metrics(csv_path, position_filter=None):
+    """Create a plot showing filtering metrics over time."""
     # Read CSV file
     df = pd.read_csv(csv_path)
 
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    axes = axes.flatten()
+    # Filter by position if specified
+    if position_filter:
+        df = df[df['orientation'] == position_filter]
+        if df.empty:
+            print(f"No data found for position {position_filter}")
+            return None
 
-    row_nums = []
-    pgo_errors = []
-    node_errors = {0: [], 1: [], 2: [], 3: []}
+    # Create figure with subplots for different metrics
+    fig, axes = plt.subplots(3, 1, figsize=(12, 10))
+    fig.suptitle('Filtering Metrics Over Time', fontsize=16)
 
-    # Process each row
-    for idx, row in df.iterrows():
-        row_num = idx + 1
-        row_nums.append(row_num)
+    # Row numbers for x-axis
+    row_nums = range(1, len(df) + 1)
 
-        # Calculate PGO error
-        ground_truth = np.array([row['ground_truth_x'], row['ground_truth_y'], row['ground_truth_z']])
-        pgo_result = np.array([row['pgo_x'], row['pgo_y'], row['pgo_z']])
-        pgo_error = np.sqrt(np.sum((pgo_result - ground_truth)**2))
-        pgo_errors.append(pgo_error)
-
-        # Calculate individual node errors
-        try:
-            binned_data = json.loads(row['binned_data_json'])
-            measurements = binned_data['measurements']
-
-            for node_id_str, node_measurements in measurements.items():
-                node_id = int(node_id_str)
-
-                # Calculate average position for this node
-                phone_positions = []
-                for measurement in node_measurements:
-                    local_vec = np.array(measurement)
-                    global_vec = ANCHOR_R[node_id] @ local_vec
-                    phone_pos = anchor_positions[node_id] + global_vec
-                    phone_positions.append(phone_pos)
-
-                if phone_positions:
-                    avg_pos = np.mean(phone_positions, axis=0)
-                    node_error = np.sqrt(np.sum((avg_pos - ground_truth)**2))
-                    node_errors[node_id].append(node_error)
-                else:
-                    node_errors[node_id].append(np.nan)
-
-        except (json.JSONDecodeError, KeyError):
-            for node_id in [0, 1, 2, 3]:
-                node_errors[node_id].append(np.nan)
-
-    # Plot 1: PGO error over time
-    axes[0].plot(row_nums, pgo_errors, 'o-', color='purple', linewidth=2, markersize=8)
-    axes[0].set_xlabel('Row Number')
-    axes[0].set_ylabel('Error (cm)')
-    axes[0].set_title('PGO Positioning Error by Row')
-    axes[0].set_ylim(0, 400)
+    # Plot metrics
+    axes[0].plot(row_nums, df['total_measurements'], 'b-', label='Total Measurements', linewidth=2)
+    axes[0].plot(row_nums, df['rejected_measurements'], 'r-', label='Rejected Measurements', linewidth=2)
+    axes[0].set_ylabel('Count')
+    axes[0].set_title('Measurement Counts')
+    axes[0].legend()
     axes[0].grid(True, alpha=0.3)
 
-    # Plot 2: Individual node errors
-    node_colors = {0: 'red', 1: 'blue', 2: 'green', 3: 'orange'}
-    for node_id in [0, 1, 2, 3]:
-        valid_errors = [e for e in node_errors[node_id] if not np.isnan(e)]
-        valid_rows = [row_nums[i] for i, e in enumerate(node_errors[node_id]) if not np.isnan(e)]
-        if valid_errors:
-            axes[1].plot(valid_rows, valid_errors, 'o-', color=node_colors[node_id],
-                        linewidth=2, markersize=6, label=f'Node {node_id}')
-
-    axes[1].set_xlabel('Row Number')
-    axes[1].set_ylabel('Error (cm)')
-    axes[1].set_title('Individual Node Positioning Error by Row')
-    axes[1].set_ylim(0, 400)
+    axes[1].plot(row_nums, df['late_drops'], 'orange', label='Late Drops', linewidth=2)
+    axes[1].set_ylabel('Count')
+    axes[1].set_title('Late Drops (Measurements Too Old)')
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 
-    # Plot 3: Error comparison box plot
-    all_pgo_errors = [e for e in pgo_errors if not np.isnan(e)]
-    node_error_lists = []
-    node_labels = []
-
-    for node_id in [0, 1, 2, 3]:
-        valid_errors = [e for e in node_errors[node_id] if not np.isnan(e)]
-        if valid_errors:
-            node_error_lists.append(valid_errors)
-            node_labels.append(f'Node {node_id}')
-
-    if node_error_lists:
-        bp = axes[2].boxplot(node_error_lists, labels=node_labels, patch_artist=True)
-        for patch, color in zip(bp['boxes'], ['red', 'blue', 'green', 'orange'][:len(node_error_lists)]):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.7)
-
-        # Add PGO error line
-        axes[2].axhline(y=np.mean(all_pgo_errors), color='purple', linestyle='--',
-                       linewidth=2, label=f'PGO Mean: {np.mean(all_pgo_errors):.1f} cm')
-        axes[2].legend()
-
-    axes[2].set_ylabel('Error (cm)')
-    axes[2].set_title('Error Distribution Comparison')
+    # Calculate rejection rate
+    rejection_rate = df['rejected_measurements'] / df['total_measurements'] * 100
+    axes[2].plot(row_nums, rejection_rate, 'purple', linewidth=2)
+    axes[2].set_ylabel('Rejection Rate (%)')
+    axes[2].set_xlabel('Data Point Number')
+    axes[2].set_title('Measurement Rejection Rate')
     axes[2].grid(True, alpha=0.3)
-
-    # Plot 4: Error statistics summary
-    axes[3].axis('off')
-
-    stats_text = f"Dataset Summary (10 data points):\n\n"
-    stats_text += f"PGO Errors:\n"
-    stats_text += f"  Mean: {np.mean(pgo_errors):.1f} cm\n"
-    stats_text += f"  Std: {np.std(pgo_errors):.1f} cm\n"
-    stats_text += f"  Min: {np.min(pgo_errors):.1f} cm\n"
-    stats_text += f"  Max: {np.max(pgo_errors):.1f} cm\n\n"
-
-    for node_id in [0, 1, 2, 3]:
-        valid_errors = [e for e in node_errors[node_id] if not np.isnan(e)]
-        if valid_errors:
-            stats_text += f"Node {node_id} Errors:\n"
-            stats_text += f"  Mean: {np.mean(valid_errors):.1f} cm\n"
-            stats_text += f"  Std: {np.std(valid_errors):.1f} cm\n"
-            stats_text += f"  Available: {len(valid_errors)}/10 points\n\n"
-
-    axes[3].text(0.05, 0.95, stats_text, transform=axes[3].transAxes,
-                fontsize=10, verticalalignment='top', fontfamily='monospace')
 
     plt.tight_layout()
 
-    # Save the error summary plot
-    output_path = Path(__file__).parent.parent / 'all_datapoints_error_summary.png'
+    # Save the plot
+    output_path = Path(__file__).parent.parent / 'filtering_metrics.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Error summary plot saved to: {output_path}")
+    print(f"Filtering metrics plot saved to: {output_path}")
 
     return fig
 
 if __name__ == "__main__":
-    # Path to the data file
-    data_path = Path(__file__).parent.parent / "datapoints(unsure).csv"
+    import argparse
 
-    print(f"Creating comprehensive overview from: {data_path}")
+    parser = argparse.ArgumentParser(description='Generate data processing plots')
+    parser.add_argument('csv_path', help='Path to the CSV file')
+    parser.add_argument('--position', '-p', help='Filter by position (A, B, C, etc.)', default=None)
 
-    # Create the main overview plot
-    fig_overview = plot_all_datapoints_overview(data_path)
+    args = parser.parse_args()
 
-    # Create the error summary plot
-    fig_errors = create_error_summary_plot(data_path)
+    csv_path = Path(args.csv_path)
+    if not csv_path.exists():
+        print(f"CSV file not found: {csv_path}")
+        sys.exit(1)
 
-    print("\nPlots generated successfully!")
-    print("- all_datapoints_overview.png: Comprehensive view of all measurements")
-    print("- all_datapoints_error_summary.png: Error analysis across all data points")
+    print(f"Processing {csv_path} with position filter: {args.position}")
+
+    # Generate plots
+    fig1 = plot_all_datapoints_overview(str(csv_path), args.position)
+    fig2 = plot_filtering_metrics(str(csv_path), args.position)
+
+    if fig1 is not None and fig2 is not None:
+        print("Plots generated successfully!")
+    else:
+        print("No data found for the specified filter")
