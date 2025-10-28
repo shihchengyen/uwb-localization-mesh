@@ -8,7 +8,7 @@ from pathlib import Path
 
 # Import the transformation functions from the localization package
 import sys
-sys.path.append(str(Path(__file__).parent.parent / 'packages'))
+sys.path.append(str(Path(__file__).parent.parent.parent.parent / 'packages'))
 from localization_algos.edge_creation.transforms import ANCHOR_R
 
 def load_and_plot_data_with_anchors(csv_path):
@@ -47,7 +47,7 @@ def load_and_plot_data_with_anchors(csv_path):
 
         # Parse measurements for this row
         try:
-            binned_data = json.loads(row['binned_data_json'])
+            binned_data = json.loads(row['filtered_binned_data_json'])
             measurements = binned_data['measurements']
 
             for node_id_str, node_measurements in measurements.items():
@@ -106,7 +106,7 @@ def load_and_plot_data_with_anchors(csv_path):
 
         # Parse measurements for this row
         try:
-            binned_data = json.loads(row['binned_data_json'])
+            binned_data = json.loads(row['filtered_binned_data_json'])
             measurements = binned_data['measurements']
 
             for node_id_str, node_measurements in measurements.items():
@@ -224,7 +224,7 @@ def create_individual_plots(csv_path):
 
 if __name__ == "__main__":
     # Path to the data file
-    data_path = Path(__file__).parent / "Data" / "datapoints(unsure).csv"
+    data_path = Path(__file__).parent.parent / "datapoints.csv"
 
     print(f"Loading data from: {data_path}")
 

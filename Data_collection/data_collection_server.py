@@ -177,7 +177,12 @@ class DataCollectionServer(ServerBringUp):
                     'ground_truth_x', 'ground_truth_y', 'ground_truth_z',
                     'pgo_x', 'pgo_y', 'pgo_z',
                     'orientation',
-                    'binned_data_json'
+                    'filtered_binned_data_json',
+                    'raw_binned_data_json',
+                    'total_measurements',
+                    'rejected_measurements',
+                    'late_drops',
+                    'rejection_reasons'
                 ])
         
         # Variance CSV headers
@@ -235,6 +240,11 @@ class DataCollectionServer(ServerBringUp):
             raw_binner = self._raw_binners[phone_id]
             raw_binned = raw_binner.create_binned_data(phone_id)
 
+        # Get filtering metrics from the filtered binner
+        filtered_metrics = None
+        if hasattr(self, '_filtered_binners') and phone_id in self._filtered_binners:
+            filtered_metrics = self._filtered_binners[phone_id].get_metrics()
+
         with open(self.datapoints_file, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -243,7 +253,11 @@ class DataCollectionServer(ServerBringUp):
                 pgo_measurement[0], pgo_measurement[1], pgo_measurement[2],
                 orientation,
                 json.dumps(self._binned_data_to_json_dict(filtered_binned)) if filtered_binned else "{}",
-                json.dumps(self._binned_data_to_json_dict(raw_binned)) if raw_binned else "{}"
+                json.dumps(self._binned_data_to_json_dict(raw_binned)) if raw_binned else "{}",
+                filtered_metrics.total_measurements if filtered_metrics else 0,
+                filtered_metrics.rejected_measurements if filtered_metrics else 0,
+                filtered_metrics.late_drops if filtered_metrics else 0,
+                json.dumps(dict(filtered_metrics.rejection_reasons) if filtered_metrics else {})
             ])
             
         return pgo_measurement, latest_binned

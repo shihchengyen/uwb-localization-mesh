@@ -31,8 +31,8 @@ def extract_row_data(csv_path, row_index=9):
         row_data['pgo_z']
     ])
 
-    # Parse the binned data JSON
-    binned_data = json.loads(row_data['binned_data_json'])
+    # Parse the filtered binned data JSON
+    binned_data = json.loads(row_data['filtered_binned_data_json'])
 
     return ground_truth, pgo_result, binned_data
 
