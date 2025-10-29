@@ -369,17 +369,17 @@ Each component provides detailed logging:
 
 ### **Custom Delay:**
 ```bash
-python3 audio_controller_laptop.py --delay 0.3  # 300ms delay
+python3 synchronized_audio_controller_laptop.py --delay 0.3  # 300ms delay
 ```
 
 ### **Custom WAV File:**
 ```bash
-python3 audio_player_rpi.py --id 1 --wav my_custom_audio.wav
+python3 synchronized_audio_player_rpi.py --id 1 --wav my_custom_audio.wav
 ```
 
 ### **Network Configuration:**
 ```bash
-python3 audio_controller_laptop.py --broker 192.168.1.100 --port 1884
+python3 synchronized_audio_controller_laptop.py --broker 192.168.1.100 --port 1884
 ```
 
 ## 🎯 Example Session

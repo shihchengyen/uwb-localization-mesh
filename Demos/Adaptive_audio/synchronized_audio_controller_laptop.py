@@ -13,10 +13,11 @@ from typing import Dict, Any, Optional
 import sys
 import os
 import numpy as np
+import uuid
 
 # Add packages to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'packages'))
-from uwb_mqtt_server.config import MQTTConfig
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+from packages.uwb_mqtt_server.config import MQTTConfig
 from Server_bring_up import ServerBringUp
 
 # ====== NETWORK CONFIGURATION ======
@@ -96,24 +97,29 @@ class PositionAwareAudioController(ServerBringUp):
     
     def update_speaker_control(self):
         """Update speaker control based on current position. Control as in mute one of the pairs, enable the other."""
+        """Gets user position to determine pair, mute inactive pair of speakers."""
         if self.user_position is None:
+            print(f"⚠️ No position data yet")
             return
         
-        new_speaker_pair = self.determine_speaker_pair(self.user_position)
+        print(f"📊 Checking position: Y={self.user_position[1]:.1f}cm")
+        new_speaker_pair = self.determine_speaker_pair(self.user_position) #determine front or back pair of speakers (based on y-coord)
         
         if new_speaker_pair != self.current_speaker_pair:
             with self.audio_lock:
-                self.current_speaker_pair = new_speaker_pair
-                
-                # Mute the inactive pair
+
                 if new_speaker_pair == "front":
+                    self._unmute_speakers([2, 3]) 
                     # Mute back speakers (1,0), enable front speakers (3,2)
                     self._mute_speakers([0, 1])
-                    print(f"🎯 Position Y={self.user_position[1]:.1f}cm > {self.position_threshold}cm → Front speakers (RPi 3,2) active")
+                    print(f"🎯 Position Y={self.user_position[1]:.1f}cm → Front speakers (RPi 2,3) active, Back speakers (RPi 0,1) muted")
                 else:
+                    self._unmute_speakers([0, 1])
                     # Mute front speakers (3,2), enable back speakers (1,0)
                     self._mute_speakers([2, 3])
-                    print(f"🎯 Position Y={self.user_position[1]:.1f}cm ≤ {self.position_threshold}cm → Back speakers (RPi 1,0) active")
+                    print(f"🎯 Position Y={self.user_position[1]:.1f}cm → Back speakers (RPi 0,1) active, Front speakers (RPi 2,3) muted")
+                
+                self.current_speaker_pair = new_speaker_pair
     
     def _mute_speakers(self, rpi_ids: list):
         """Mute specified speakers by setting volume to 0."""
@@ -121,7 +127,7 @@ class PositionAwareAudioController(ServerBringUp):
             self.send_audio_command("volume", rpi_id=rpi_id, volume=0)
     
     def _unmute_speakers(self, rpi_ids: list):
-        """Unmute specified speakers by restoring their tracked volume."""
+        """Unmute specified speakers by restoring their *last set* volume."""
         for rpi_id in rpi_ids:
             self.send_audio_command("volume", rpi_id=rpi_id, volume=self.volumes[rpi_id])
     
@@ -130,14 +136,15 @@ class PositionAwareAudioController(ServerBringUp):
         global_time = self.get_global_time()
         execute_time = global_time + self.target_delay
         
-        # Create command message
+        # Create command message with unique ID to prevent duplicate filtering
         message = {
             "command": command,
             "execute_time": execute_time,
             "global_time": global_time,
             "delay_ms": int(self.target_delay * 1000),
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "rpi_id": rpi_id  # None means broadcast to all
+            "rpi_id": rpi_id,  # None means broadcast to all
+            "command_id": str(uuid.uuid4())  # Unique ID for each command
         }
         
         # Add volume if specified
@@ -150,9 +157,9 @@ class PositionAwareAudioController(ServerBringUp):
         if command in ["left", "right"] and rpi_id is not None:
             if command == "left":
                 if rpi_id in [1, 2]:  # Left speakers get louder
-                    self.volumes[rpi_id] = min(100, self.volumes[rpi_id] + 10)
+                    self.volumes[rpi_id] = min(100, self.volumes[rpi_id] + 15)
                 else:  # Right speakers get quieter
-                    self.volumes[rpi_id] = max(0, self.volumes[rpi_id] - 10)
+                    self.volumes[rpi_id] = max(0, self.volumes[rpi_id] - 15)
             elif command == "right":
                 if rpi_id in [1, 2]:  # Left speakers get quieter
                     self.volumes[rpi_id] = max(0, self.volumes[rpi_id] - 15)
@@ -164,33 +171,45 @@ class PositionAwareAudioController(ServerBringUp):
         # Publish to MQTT
         payload = json.dumps(message, indent=None)
         
-        if rpi_id:
+        # Check if rpi_id is provided (can be 0, which is falsy, so use "is not None")
+        if rpi_id is not None:
             topic = f"{self.audio_topic}/rpi_{rpi_id}"
             print(f"📤 {command.upper()} → RPi {rpi_id} (vol: {message.get('target_volume', 'N/A')})")
+            print(f"   Topic: {topic}")
+            print(f"   Execute at: {execute_time:.3f} (in {self.target_delay}s)")
+            print(f"   Global time: {global_time:.3f}")
         else:
             topic = f"{self.audio_topic}/broadcast"
             print(f"📤 {command.upper()} → ALL RPIs")
-        
-        print(f"   Topic: {topic}")
-        print(f"   Execute at: {execute_time:.3f} (in {self.target_delay}s)")
-        print(f"   Global time: {global_time:.3f}")
+            print(f"   Topic: {topic}")
+            print(f"   Execute at: {execute_time:.3f} (in {self.target_delay}s)")
+            print(f"   Global time: {global_time:.3f}")
         
         self.audio_client.publish(topic, payload, qos=1)
         self.audio_client.loop_write()  # Ensure message is sent
     
     def send_command(self, command: str, rpi_id: Optional[int] = None):
         """Send audio command with position-aware speaker control."""
-        # Update speaker control based on current position
+        # Always update speaker control based on current position first
+        # This ensures speakers switch when position crosses threshold
         self.update_speaker_control()
         
-        # Determine which speakers should receive the command
+        # Determine which speakers should receive the command based on CURRENT state
         if self.current_speaker_pair == "front":
             active_speakers = [2, 3]  # RPi 2,3
-        else:
+        elif self.current_speaker_pair == "back":
             active_speakers = [0, 1]  # RPi 0,1
+        else:
+            # No position data yet, default to all speakers
+            active_speakers = [0, 1, 2, 3]
         
         # For start/stop commands: send to ALL RPis for synchronization
         if command in ["start", "pause"]:
+            # Before START, unmute all speakers so they all hear the command [TESTING]
+            if command == "start" and rpi_id is None:
+                self._unmute_speakers([0, 1, 2, 3])
+                print("🔊 Unmuting all speakers for synchronized start")
+            
             if rpi_id is None:
                 # Send to all RPis for synchronization
                 for speaker_id in [0, 1, 2, 3]:
@@ -231,9 +250,6 @@ class PositionAwareAudioController(ServerBringUp):
         print("  a = LEFT (pan left - active speakers only)")
         print("  d = RIGHT (pan right - active speakers only)")
         print("  q = QUIT")
-        # print(f"\nPosition threshold: Y = {self.position_threshold}cm")
-        # print("  Y > 300cm → Back speakers (RPi 0,1) active")
-        # print("  Y ≤ 300cm → Front speakers (RPi 2,3) active")
         print("\nPress keys and Enter...")
         
         while True:
@@ -286,7 +302,7 @@ def main():
     parser.add_argument("--broker", default=DEFAULT_BROKER_IP, help="MQTT broker IP")
     parser.add_argument("--port", type=int, default=1884, help="MQTT broker port")
     parser.add_argument("--delay", type=float, default=0.5, help="Target execution delay in seconds")
-    # parser.add_argument("--window", type=float, default=1.0, help="Position tracking window size (seconds)")
+    parser.add_argument("--window", type=float, default=1.0, help="Position tracking window size (seconds)")
     
     args = parser.parse_args()
     
