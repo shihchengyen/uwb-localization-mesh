@@ -11,12 +11,13 @@ Continuously reads user positions from ServerBringUp and:
   - Move right → increase LEFT speaker volume, decrease RIGHT speaker volume
 
 
-To run: uv run Demos/Adaptive_audio/adaptive_audio_controller.py --broker <ip> --port 1884
+To run: uv run Demos/Adaptive_audio/adaptive_audio_controller.py --broker 192.168.68.53 --port 1884
 
 """
 
 import json
 import time
+import logging
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
@@ -24,6 +25,11 @@ import paho.mqtt.client as mqtt
 import sys
 import os
 import uuid
+
+# Suppress MQTT and position logs - only show WARNING and above
+logging.getLogger().setLevel(logging.WARNING)
+logging.getLogger("Server_bring_up").setLevel(logging.WARNING)
+logging.getLogger("packages.uwb_mqtt_server").setLevel(logging.WARNING)
 
 # Add repo root to path to import packages and ServerBringUp
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -57,6 +63,8 @@ class AdaptiveAudioController(ServerBringUp):
         # State
         self.current_pair: Optional[str] = None  # "front" or "back"
         self.started_for_pair: Optional[str] = None
+        self.volumes = {0: 70, 1: 70, 2: 70, 3: 70}
+        self._shutdown_requested = False
 
         # Connect MQTT for audio
         self._connect_audio_mqtt()
@@ -89,6 +97,10 @@ class AdaptiveAudioController(ServerBringUp):
         else:
             topic = f"{self.audio_topic}/rpi_{rpi_id}"
         self._publish(topic, msg)
+
+        # Track local volume state (for live monitoring)
+        if command == "volume" and rpi_id is not None and volume is not None:
+            self.volumes[rpi_id] = clamp(volume)
 
     def _compute_pair_and_volumes(self, position) -> Tuple[str, Tuple[int, int]]:
         """
@@ -156,6 +168,32 @@ class AdaptiveAudioController(ServerBringUp):
 
         self.current_pair = pair
 
+    def _print_status(self) -> None:
+        vols = self.volumes
+        pair = self.current_pair or "unknown"
+        # Single-line live status
+        line = (
+            f"Pair:{pair:>5} | Vols -> R0:{vols[0]:3d}  R1:{vols[1]:3d}  R2:{vols[2]:3d}  R3:{vols[3]:3d}"
+        )
+        print(f"\r{line}", end="", flush=True)
+
+    def _keyboard_loop(self) -> None:
+        print("\nKeyboard: 's' START, 'p' PAUSE, 'q' QUIT")
+        while not self._shutdown_requested:
+            try:
+                cmd = input().strip().lower()
+            except EOFError:
+                break
+            if cmd == "q":
+                self._shutdown_requested = True
+                break
+            elif cmd == "s":
+                for r in [0, 1, 2, 3]:
+                    self._send_audio_command("start", rpi_id=r)
+            elif cmd == "p":
+                for r in [0, 1, 2, 3]:
+                    self._send_audio_command("pause", rpi_id=r)
+
     def run(self) -> None:
         """Main adaptive loop."""
         # Start position server threads
@@ -163,12 +201,20 @@ class AdaptiveAudioController(ServerBringUp):
 
         print("\n🎛️ Adaptive Audio Controller running...")
         print("Logic: Y>=300 → back (1,0); Y<300 → front (2,3); X pans volumes around 240.")
+        # Start keyboard thread
+        import threading
+        threading.Thread(target=self._keyboard_loop, daemon=True).start()
+
         try:
             while True:
                 pos = self.user_position
                 if pos is not None:
                     pair, (left_vol, right_vol) = self._compute_pair_and_volumes(pos)
                     self._apply_state(pair, left_vol, right_vol)
+                # Live monitor line
+                self._print_status()
+                if self._shutdown_requested:
+                    break
                 time.sleep(0.2)  # 5 Hz updates
         except KeyboardInterrupt:
             print("\n👋 Shutting down Adaptive Audio Controller...")
