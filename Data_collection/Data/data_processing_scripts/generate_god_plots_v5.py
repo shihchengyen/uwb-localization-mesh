@@ -378,7 +378,10 @@ def create_god_plot_v5(orientation: str, data: List[Dict], output_dir: str):
                    fontweight='bold', zorder=11)
     
     # Colors for different anchor counts (worst to best) - Red to Green progression
-    colors = {1: '#FF4444', 2: '#FF8800', 3: '#FFDD00', 4: '#00AA44'}
+    # Darker colors for error bars (better visibility)
+    plot_colors = {1: '#FF1A1A', 2: '#FF6600', 3: '#FFCC00', 4: '#00CC44'}
+    # Pastel colors for labels (softer, less intrusive)
+    label_colors = {1: '#FFB3B3', 2: '#FFD1A3', 3: '#FFF4A3', 4: '#A3E6A3'}
     # Use same marker for all anchor counts for consistency
     marker = 'o'
     
@@ -389,8 +392,8 @@ def create_god_plot_v5(orientation: str, data: List[Dict], output_dir: str):
         
         print(f"\n  Processing position {ground_truth}:")
         
-        # Plot ground truth position
-        ax.plot(ground_truth[0], ground_truth[1], 'ko', markersize=12, 
+        # Plot ground truth position (smaller size)
+        ax.plot(ground_truth[0], ground_truth[1], 'ko', markersize=8, 
                 label='Ground Truth' if pos_key == list(position_groups.keys())[0] else '',
                 zorder=8)
         ax.annotate(f'GT({ground_truth[0]:.0f},{ground_truth[1]:.0f})', 
@@ -411,12 +414,13 @@ def create_god_plot_v5(orientation: str, data: List[Dict], output_dir: str):
             stats = statistics[num_anchors]
             mean_x, mean_y, std_x, std_y = stats
             
-            color = colors.get(num_anchors, 'gray')
+            plot_color = plot_colors.get(num_anchors, 'gray')
+            label_color = label_colors.get(num_anchors, 'gray')
             
             # Plot crosshair error bars only (no center marker to avoid clutter)
             ax.errorbar(mean_x, mean_y, xerr=std_x, yerr=std_y, 
                        fmt='none',  # No center marker
-                       color=color, 
+                       color=plot_color, 
                        capsize=4, capthick=1, elinewidth=0.8,  # Thinner lines
                        label=f'{num_anchors} Anchor{"s" if num_anchors > 1 else ""} (Worst Case)' 
                              if pos_key == list(position_groups.keys())[0] else '',
@@ -430,16 +434,16 @@ def create_god_plot_v5(orientation: str, data: List[Dict], output_dir: str):
             offsets = {1: (20, 20), 2: (-60, 20), 3: (20, -40), 4: (-60, -40)}
             offset_x, offset_y = offsets.get(num_anchors, (15, 15))
             
-            anchor_text = f"{num_anchors}A: {worst_combinations[num_anchors]}\nErr: {distance_error:.1f}cm"
+            anchor_text = f"Err: {distance_error:.1f}cm"
             ax.annotate(anchor_text, (mean_x, mean_y), 
                        xytext=(offset_x, offset_y), textcoords='offset points', fontsize=8, 
-                       bbox=dict(boxstyle='round,pad=0.3', facecolor=color, alpha=0.8),
+                       bbox=dict(boxstyle='round,pad=0.3', facecolor=label_color, alpha=0.8),
                        zorder=6)
     
     # Add summary statistics text
     summary_text = f"Orientation {orientation} - Worst Case Analysis (Masking):\n"
     
-    for num_anchors in sorted(colors.keys()):
+    for num_anchors in sorted(plot_colors.keys()):
         anchor_errors = []
         
         for pos_key in position_groups.keys():
@@ -486,7 +490,7 @@ def main():
     """Main function to generate all god plots with proper measurement masking."""
     
     # Paths
-    csv_path = '/Users/hongyilin/projects/uwb-localization-mesh/Data_collection/Data/28oct/datapoints(28oct).csv'
+    csv_path = '/Users/hongyilin/projects/uwb-localization-mesh/Data_collection/Data/28oct/datapoints28oct.csv'
     output_dir = '/Users/hongyilin/projects/uwb-localization-mesh/Data_collection/Data/28oct/god_plots'
     
     print("Loading data...")
