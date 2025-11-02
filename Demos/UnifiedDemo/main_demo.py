@@ -10,23 +10,34 @@ from appbus import AppBus
 from services.settings import load_settings
 from services.mqtt_service import MqttService
 
-def _start_server_bringup():
+def _start_server_bringup(use_dummy=False):
     sb = None
-    try:
-        from Demos.ServerBringUp import ServerBringUp
-        sb = ServerBringUp()
-        if hasattr(sb, "start"): sb.start()
-        return sb
-    except Exception:
-        pass
-    try:
-        from ServerBringUp import ServerBringUp
-        sb = ServerBringUp()
-        if hasattr(sb, "start"): sb.start()
-        return sb
-    except Exception:
-        print("[UnifiedDemo] ServerBringUp not found. Continuing without it.")
-        return None
+    if use_dummy:
+        try:
+            from Demos.DummyServerBringUp import DummyServerBringUp
+            sb = DummyServerBringUp()
+            if hasattr(sb, "start"): sb.start()
+            return sb
+        except Exception as e:
+            print(f"[UnifiedDemo] DummyServerBringUp failed to load: {e}")
+            return None
+    else:
+        # Try real server first
+        try:
+            from Demos.ServerBringUp import ServerBringUp
+            sb = ServerBringUp()
+            if hasattr(sb, "start"): sb.start()
+            return sb
+        except Exception:
+            pass
+        try:
+            from ServerBringUp import ServerBringUp
+            sb = ServerBringUp()
+            if hasattr(sb, "start"): sb.start()
+            return sb
+        except Exception:
+            print("[UnifiedDemo] ServerBringUp not found. Use --dummy flag for simulation.")
+            return None
 
 def _import_pkg_fallback():
     # Allow running from a repo where 'packages' are siblings of Demos/
@@ -63,8 +74,9 @@ def _load_zonedj_widget(app_bus, services, settings):
         return w
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, use_dummy=False):
         super().__init__()
+        self._use_dummy = use_dummy
         self.setWindowTitle("Unified Demo • PGO Data | Adaptive Audio | Zone DJ")
         self.resize(1400, 900)
 
@@ -86,7 +98,7 @@ class MainWindow(QMainWindow):
         # Status & start
         self.bus.mqttStatusChanged.connect(self._on_mqtt_status)
         self.statusBar().showMessage("MQTT: starting…")
-        self._server_bringup = _start_server_bringup()
+        self._server_bringup = _start_server_bringup(use_dummy=getattr(self, '_use_dummy', False))
         self.mqtt.start()
 
         # Default floorplan load (same folder as main demo)
@@ -226,8 +238,15 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 def main():
-    app = QApplication(sys.argv)
-    win = MainWindow()
+    import argparse
+    parser = argparse.ArgumentParser(description='Unified Demo')
+    parser.add_argument('--dummy', action='store_true',
+                      help='Use dummy server for simulation instead of real hardware')
+    args, qt_args = parser.parse_known_args()
+
+    # Qt needs its own args
+    app = QApplication(qt_args if qt_args else sys.argv)
+    win = MainWindow(use_dummy=args.dummy)
     win.show()
     sys.exit(app.exec_())
 
