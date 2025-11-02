@@ -153,7 +153,7 @@ uv run python Anchor_bring_up.py --anchor-id 0 --broker YOUR_LAPTOP_IP
 
 Example:
 ```bash
-uv run python Anchor_bring_up.py --anchor-id 0 --broker 192.168.68.66
+uv run python Anchor_bring_up.py --anchor-id 0 --broker 192.168.68.63 
 ```
 
 You should see:
@@ -246,14 +246,14 @@ This will show you:
 **Example output:**
 ```
 ======================================================================
-Anchor 0 @ [0, 600, 0]
+Anchor 0 @ [0, 550, 0]
 ======================================================================
 Local  [X, Y, Z]: [  123.45,   234.56,    78.90] cm
 Global [X, Y, Z]: [  123.45,   234.56,    78.90] cm
 
 Phone position (anchor + global vector):
   X = 0.00 + 123.45 = 123.45
-  Y = 600.00 + 234.56 = 784.56
+  Y = 550.00 + 234.56 = 784.56
   Z = 0.00 + 78.90 = 78.90
 ✅ REASONABLE - within room bounds
 

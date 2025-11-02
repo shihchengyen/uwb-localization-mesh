@@ -9,23 +9,26 @@ Laptop (MQTT Publisher)
     ↓ MQTT Commands
 MQTT Broker (Mosquitto)
     ↓ MQTT Commands  
-RPi 1 (Left Speaker)    RPi 2 (Right Speaker)
+RPi 1,2 (Left Speakers)    RPi 0,3 (Right Speakers)
 ```
 
 ## 📋 Components
 
 ### 1. **Laptop Controller** (`audio_controller_laptop.py`)
 - Publishes MQTT commands with global timing
-- Keyboard controls: `s` (start), `a` (left), `d` (right), `q` (quit)
+- Keyboard controls: `s` (start), `p` (pause), `a` (left), `d` (right), `q` (quit)
 - 500ms delay from keyboard press to execution
 - Tracks volume levels for each RPi
 
 ### 2. **RPi Audio Players** (`audio_player_rpi.py`)
 - Subscribe to MQTT commands
 - Execute commands at synchronized global times
+- **Stereo Channel Separation**:
+  - **RPi 1,2 (Left)**: Play only the LEFT channel of the audio file
+  - **RPi 0,3 (Right)**: Play only the RIGHT channel of the audio file
 - Volume control based on RPi ID and command:
-  - **RPi 1 (Left)**: Left commands increase volume, Right commands decrease
-  - **RPi 2 (Right)**: Left commands decrease volume, Right commands increase
+  - **RPi 1,2 (Left)**: Left commands increase volume, Right commands decrease
+  - **RPi 0,3 (Right)**: Left commands decrease volume, Right commands increase
 
 ## 🚀 Setup Instructions
 
@@ -147,8 +150,8 @@ You should see:
 🎹 Audio Controller Ready!
 Keyboard Commands:
   s = START (broadcast to all RPIs)
-  a = LEFT (pan left - RPi 1 louder, RPi 2 quieter)
-  d = RIGHT (pan right - RPi 1 quieter, RPi 2 louder)
+  a = LEFT (pan left - RPi 1 louder, RPi 0 quieter)
+  d = RIGHT (pan right - RPi 1 quieter, RPi 0 louder)
   q = QUIT
 
 Press keys and Enter...
@@ -174,11 +177,11 @@ You should see:
    Initial volume: 20%
 ```
 
-#### **Step 3: Start RPi 2 (Right Speaker)**
-On RPi 2:
+#### **Step 3: Start RPi 0 (Right Speaker)**
+On RPi 0:
 ```bash
 cd Demos/Adaptive_audio
-python3 synchronized_audio_player_rpi.py --id 2
+python3 synchronized_audio_player_rpi.py --id 0
 ```
 
 You should see:
@@ -188,7 +191,7 @@ You should see:
 ✅ MQTT Connected successfully
 📡 Subscribed to: audio/commands/broadcast
 📡 Subscribed to: audio/commands/rpi_2
-🎵 RPi 2 Audio Player Ready
+🎵 RPi 0 Audio Player Ready
    WAV file: crazy-carls-brickhouse-tavern.wav
    Position: RIGHT
    Initial volume: 20%
@@ -205,14 +208,15 @@ On the laptop controller, type commands:
 ## 🎹 Usage
 
 ### **Laptop Controls:**
-- `s` + Enter: **START** - Start playing audio on all RPis at 20% volume
-- `a` + Enter: **LEFT** - Pan audio left (RPi 1 louder, RPi 2 quieter)
-- `d` + Enter: **RIGHT** - Pan audio right (RPi 1 quieter, RPi 2 louder)
+- `s` + Enter: **START** - Start playing audio on all RPis at 70% volume
+- `p` + Enter: **PAUSE** - Pause synchronized audio on all RPis
+- `a` + Enter: **LEFT** - Pan audio left (RPi 1,2 louder; RPi 0,3 quieter) - controls all RPis
+- `d` + Enter: **RIGHT** - Pan audio right (RPi 1,2 quieter; RPi 0,3 louder) - controls all RPis
 - `q` + Enter: **QUIT** - Exit the controller
 
 ### **Volume Changes:**
-- **Left command**: RPi 1 gets +10%, RPi 2 gets -10%
-- **Right command**: RPi 1 gets -15%, RPi 2 gets +15%
+- **Left command**: RPi 1,2 get +15%; RPi 0,3 get -15%
+- **Right command**: RPi 1,2 get -15%; RPi 0,3 get +15%
 
 ### **Timing:**
 - All commands execute 500ms after keyboard press
@@ -223,7 +227,9 @@ On the laptop controller, type commands:
 ### **MQTT Topics:**
 - `audio/commands/broadcast` - Commands for all RPis
 - `audio/commands/rpi_1` - Commands specifically for RPi 1
+- `audio/commands/rpi_0` - Commands specifically for RPi 0
 - `audio/commands/rpi_2` - Commands specifically for RPi 2
+- `audio/commands/rpi_3` - Commands specifically for RPi 3
 
 ### **Command Format:**
 ```json
@@ -278,6 +284,12 @@ On the laptop controller, type commands:
    python3 loop_player.py
    ```
 
+4. **Stereo Channel Separation:**
+   - **RPi 1,2** automatically play only the LEFT channel
+   - **RPi 0,3** automatically play only the RIGHT channel
+   - If you hear both channels on one speaker, check the RPi ID parameter
+   - The system processes stereo WAV files to extract individual channels
+
 ### **Synchronization Issues:**
 1. **Check system clocks:**
    ```bash
@@ -312,7 +324,7 @@ On the laptop controller, type commands:
 1. Start MQTT broker on laptop
 2. Start laptop controller
 3. Start RPi 1 audio player
-4. Start RPi 2 audio player
+4. Start RPi 0 audio player
 5. Control from laptop
 
 ### **Common Commands:**
@@ -323,8 +335,14 @@ python3 audio_controller_laptop.py
 # RPi 1 (Left)
 python3 audio_player_rpi.py --id 1
 
-# RPi 2 (Right)  
+# RPi 0 (Right)  
+python3 audio_player_rpi.py --id 0
+
+# RPi 2 (Left)
 python3 audio_player_rpi.py --id 2
+
+# RPi 3 (Right)
+python3 audio_player_rpi.py --id 3
 
 # Test audio
 python3 test_audio_cards.py
@@ -351,27 +369,31 @@ Each component provides detailed logging:
 
 ### **Custom Delay:**
 ```bash
-python3 audio_controller_laptop.py --delay 0.3  # 300ms delay
+python3 synchronized_audio_controller_laptop.py --delay 0.3  # 300ms delay
 ```
 
 ### **Custom WAV File:**
 ```bash
-python3 audio_player_rpi.py --id 1 --wav my_custom_audio.wav
+python3 synchronized_audio_player_rpi.py --id 1 --wav my_custom_audio.wav
 ```
 
 ### **Network Configuration:**
 ```bash
-python3 audio_controller_laptop.py --broker 192.168.1.100 --port 1884
+python3 synchronized_audio_controller_laptop.py --broker 192.168.1.100 --port 1884
 ```
 
 ## 🎯 Example Session
 
 1. **Start laptop controller**
 2. **Start RPi 1 audio player** (left speaker)
-3. **Start RPi 2 audio player** (right speaker)
-4. **Press `s`** → Both RPis start playing at 20% volume
-5. **Press `a`** → Audio pans left (RPi 1: 30%, RPi 2: 10%)
-6. **Press `d`** → Audio pans right (RPi 1: 15%, RPi 2: 25%)
-7. **Press `q`** → Stop controller
+3. **Start RPi 0 audio player** (right speaker)
+4. **Start RPi 2 audio player** (left speaker) - when facing the other way
+5. **Start RPi 3 audio player** (right speaker) - when facing the other way
+6. **Press `s`** → All RPis start playing at 70% volume
+7. **Press `a`** → Audio pans left (RPi 1,2: 85%; RPi 0,3: 55%)
+8. **Press `d`** → Audio pans right (RPi 1,2: 70%; RPi 0,3: 85%)
+9. **Press `p`** → All RPis pause synchronized
+10. **Press `s`** → Resume playing from where paused
+11. **Press `q`** → Stop controller
 
 The system provides smooth, synchronized audio panning across multiple speakers with precise timing control!
