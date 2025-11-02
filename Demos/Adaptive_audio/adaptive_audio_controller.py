@@ -26,7 +26,7 @@ import sys
 import os
 import uuid
 
-# Suppress MQTT and position logs - only show WARNING and above
+# Suppress MQTT and position logs logs after imports (to override basicConfig) - only show WARNING and above
 logging.getLogger().setLevel(logging.WARNING)
 logging.getLogger("Server_bring_up").setLevel(logging.WARNING)
 logging.getLogger("packages.uwb_mqtt_server").setLevel(logging.WARNING)
