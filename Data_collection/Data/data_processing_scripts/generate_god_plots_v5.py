@@ -143,21 +143,22 @@ def run_pgo_with_masked_measurements(measurements: Dict[str, List[List[float]]],
     
     return None
 
-def estimate_position_single_anchor(measurements: Dict[str, List[List[float]]], 
-                                  anchor_id: int,
-                                  ground_truth: Tuple[float, float]) -> Optional[np.ndarray]:
+def estimate_positions_single_anchor(measurements: Dict[str, List[List[float]]], 
+                                   anchor_id: int,
+                                   ground_truth: Tuple[float, float]) -> List[np.ndarray]:
     """
-    Estimate position using a single anchor.
-    For 1-anchor case, we can only estimate distance, so we'll place the phone
-    at the measured distance in the direction of ground truth (for comparison purposes).
+    Estimate multiple positions using a single anchor to capture measurement variability.
+    For 1-anchor case, we transform each measurement to global coordinates and place
+    the phone at the measured distance in the direction of ground truth.
+    This captures the variability within the bin for proper SD calculation.
     """
     anchor_id_str = str(anchor_id)
     if anchor_id_str not in measurements:
-        return None
+        return []
     
     vectors = measurements[anchor_id_str]
     if not vectors:
-        return None
+        return []
     
     # Transform measurements to global coordinates
     global_vectors = []
@@ -170,14 +171,9 @@ def estimate_position_single_anchor(measurements: Dict[str, List[List[float]]],
             continue
     
     if not global_vectors:
-        return None
+        return []
     
-    # Calculate average measured distance
-    distances = [np.linalg.norm(vec) for vec in global_vectors]
-    avg_distance = np.mean(distances)
-    
-    # Estimate position: place phone at measured distance from anchor
-    # in the direction toward ground truth (this gives us a comparison baseline)
+    # Estimate position for each measurement to capture variability
     anchor_pos_2d = DEFAULT_ANCHOR_POSITIONS[anchor_id][:2]
     ground_truth_2d = np.array(ground_truth)
     
@@ -189,10 +185,15 @@ def estimate_position_single_anchor(measurements: Dict[str, List[List[float]]],
         # If ground truth is at anchor position, use arbitrary direction
         direction = np.array([1.0, 0.0])
     
-    # Estimated position at measured distance in ground truth direction
-    estimated_pos = anchor_pos_2d + direction * avg_distance
+    # Create position estimates for each measurement
+    estimated_positions = []
+    for global_vector in global_vectors:
+        distance = np.linalg.norm(global_vector)
+        # Place phone at measured distance in ground truth direction
+        estimated_pos = anchor_pos_2d + direction * distance
+        estimated_positions.append(estimated_pos)
     
-    return estimated_pos
+    return estimated_positions
 
 def find_worst_case_combinations_with_masking(data_group: List[Dict], 
                                             ground_truth: Tuple[float, float]) -> Dict[int, List[int]]:
@@ -221,13 +222,13 @@ def find_worst_case_combinations_with_masking(data_group: List[Dict],
                 if anchor_id not in available_anchors:
                     continue
                 
-                pos_estimate = estimate_position_single_anchor(
+                pos_estimates = estimate_positions_single_anchor(
                     row['filtered_data']['measurements'], 
                     anchor_id, 
                     ground_truth
                 )
                 
-                if pos_estimate is not None:
+                for pos_estimate in pos_estimates:
                     distance = np.sqrt((pos_estimate[0] - ground_truth[0])**2 + 
                                      (pos_estimate[1] - ground_truth[1])**2)
                     distances.append(distance)
@@ -310,14 +311,13 @@ def calculate_position_statistics_with_masking(data_group: List[Dict],
                 if anchor_id not in available_anchors:
                     continue
                 
-                pos_estimate = estimate_position_single_anchor(
+                pos_estimates = estimate_positions_single_anchor(
                     row['filtered_data']['measurements'], 
                     anchor_id, 
                     ground_truth
                 )
                 
-                if pos_estimate is not None:
-                    positions.append(pos_estimate)
+                positions.extend(pos_estimates)
         else:
             # Handle multi-anchor case with PGO and masking
             for row in data_group:
@@ -367,7 +367,7 @@ def create_god_plot_v5(orientation: str, data: List[Dict], output_dir: str):
     print(f"Found {len(position_groups)} positions: {list(position_groups.keys())}")
     
     # Set up the plot
-    fig, ax = plt.subplots(figsize=(16, 12))
+    fig, ax = plt.subplots(figsize=(18, 14))
     
     # Plot anchor positions
     for anchor_id, pos in DEFAULT_ANCHOR_POSITIONS.items():
@@ -377,9 +377,10 @@ def create_god_plot_v5(orientation: str, data: List[Dict], output_dir: str):
                    textcoords='offset points', fontsize=12, color='red', 
                    fontweight='bold', zorder=11)
     
-    # Colors and markers for different anchor counts (worst to best)
-    colors = {1: '#FF4444', 2: '#FF8800', 3: '#FFDD00', 4: '#00AA44'}  # Red to Green progression
-    markers = {1: 'x', 2: '+', 3: '*', 4: 'o'}
+    # Colors for different anchor counts (worst to best) - Red to Green progression
+    colors = {1: '#FF4444', 2: '#FF8800', 3: '#FFDD00', 4: '#00AA44'}
+    # Use same marker for all anchor counts for consistency
+    marker = 'o'
     
     # Process each position
     position_data = {}
@@ -411,12 +412,12 @@ def create_god_plot_v5(orientation: str, data: List[Dict], output_dir: str):
             mean_x, mean_y, std_x, std_y = stats
             
             color = colors.get(num_anchors, 'gray')
-            marker = markers.get(num_anchors, 'o')
             
-            # Plot mean position with crosshair error bars
+            # Plot crosshair error bars only (no center marker to avoid clutter)
             ax.errorbar(mean_x, mean_y, xerr=std_x, yerr=std_y, 
-                       fmt=marker, markersize=12, color=color, 
-                       capsize=8, capthick=3, elinewidth=2,
+                       fmt='none',  # No center marker
+                       color=color, 
+                       capsize=4, capthick=1, elinewidth=0.8,  # Thinner lines
                        label=f'{num_anchors} Anchor{"s" if num_anchors > 1 else ""} (Worst Case)' 
                              if pos_key == list(position_groups.keys())[0] else '',
                        zorder=7)
@@ -425,10 +426,14 @@ def create_god_plot_v5(orientation: str, data: List[Dict], output_dir: str):
             distance_error = np.sqrt((mean_x - ground_truth[0])**2 + (mean_y - ground_truth[1])**2)
             
             # Add text annotation with anchor combination and error
+            # Use different offsets for different anchor counts to avoid collisions
+            offsets = {1: (20, 20), 2: (-60, 20), 3: (20, -40), 4: (-60, -40)}
+            offset_x, offset_y = offsets.get(num_anchors, (15, 15))
+            
             anchor_text = f"{num_anchors}A: {worst_combinations[num_anchors]}\nErr: {distance_error:.1f}cm"
             ax.annotate(anchor_text, (mean_x, mean_y), 
-                       xytext=(15, 15), textcoords='offset points', fontsize=9, 
-                       bbox=dict(boxstyle='round,pad=0.4', facecolor=color, alpha=0.8),
+                       xytext=(offset_x, offset_y), textcoords='offset points', fontsize=8, 
+                       bbox=dict(boxstyle='round,pad=0.3', facecolor=color, alpha=0.8),
                        zorder=6)
     
     # Add summary statistics text
@@ -465,17 +470,9 @@ def create_god_plot_v5(orientation: str, data: List[Dict], output_dir: str):
     # Set equal aspect ratio and adjust limits
     ax.set_aspect('equal')
     
-    # Add some padding to the plot limits
-    all_x = [pos[0] for pos in DEFAULT_ANCHOR_POSITIONS.values()]
-    all_y = [pos[1] for pos in DEFAULT_ANCHOR_POSITIONS.values()]
-    for pos_key in position_groups.keys():
-        all_x.append(pos_key[0])
-        all_y.append(pos_key[1])
-    
-    x_margin = (max(all_x) - min(all_x)) * 0.15
-    y_margin = (max(all_y) - min(all_y)) * 0.15
-    ax.set_xlim(min(all_x) - x_margin, max(all_x) + x_margin)
-    ax.set_ylim(min(all_y) - y_margin, max(all_y) + y_margin)
+    # Set fixed plot limits to provide more space and prevent legend overlap
+    ax.set_xlim(-100, 700)
+    ax.set_ylim(-100, 700)
     
     # Save plot
     output_path = os.path.join(output_dir, f'god_plot_v5_orientation_{orientation}.png')
