@@ -18,6 +18,7 @@ Logic:
 import json
 import time
 import logging
+import threading
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 import numpy as np
@@ -35,7 +36,7 @@ logging.getLogger("packages.uwb_mqtt_server").setLevel(logging.WARNING)
 # Add repo root to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from packages.uwb_mqtt_server.config import MQTTConfig
-
+from packages.audio_mqtt_server.playlist_controller.playlist_controller import PlaylistController
 
 # Defaults
 DEFAULT_BROKER_IP = "localhost"
@@ -53,32 +54,41 @@ def clamp(value: float, lo: int = 0, hi: int = 100) -> int:
 class AdaptiveAudioController:
     """
     Controller that adapts audio based on user position.
-    
+
     Receives position updates and sends audio commands via MQTT.
     """
-    
+
     def __init__(self, broker: str, port: int):
-        """Initialize audio controller."""
-        
+        """Initialize audio controller.
+
+        Args:
+            broker: MQTT broker IP
+            port: MQTT broker port
+        """
+
         self.audio_config = MQTTConfig(
-            broker=broker, 
-            port=port, 
+            broker=broker,
+            port=port,
             client_id=f"adaptive_audio_controller_{uuid.uuid4()}"
         )
-        self.audio_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=self.audio_config.client_id)
+        self.audio_client = mqtt.Client(client_id=self.audio_config.client_id)
         self.audio_client.username_pw_set(username=DEFAULT_USERNAME, password=DEFAULT_PASSWORD)
-        
+
         self.audio_topic = "audio/commands"
-        
+
+        # Audio control logic inside PlaylistController
+        self.playlist_controller = PlaylistController()
+
         # State
         self.current_pair: Optional[str] = None  # "front" or "back"
         self.started_for_pair: Optional[str] = None
         self.volumes = {0: 70, 1: 70, 2: 70, 3: 70}
         self._last_position = None
-        
+        self.song_queue = []
+
         # Connect MQTT
         self._connect_audio_mqtt()
-        
+
         print("🎛️ Adaptive Audio Controller initialized")
         print(f"   MQTT: {broker}:{port}")
     
@@ -211,6 +221,30 @@ class AdaptiveAudioController:
         
         # Print status
         self._print_status()
+
+    def update_playlist_for_position(self, user_position: np.ndarray) -> None:
+        """
+        Update the playlist based on user position.
+        This is called by the server when position changes.
+
+        Args:
+            user_position: numpy array [x, y, z] in cm
+        """
+        # Update playlist based on position
+        self.song_queue = self.playlist_controller.update_playlist_based_on_position(user_position)
+
+        # Also update audio hardware positioning
+        self.update_position(user_position)
+        
+
+    def next_song(self) -> None:
+        """
+        Returns the next song in the playlist. Removes the song from the queue.
+        Sends the command to the audio player to play the song.
+        """
+        song = self.song_queue.pop(0)
+        # missing implementation to send the command to the audio player to play the song.
+        return 
     
     def _print_status(self) -> None:
         """Print current status."""
@@ -231,6 +265,7 @@ class AdaptiveAudioController:
     
     def shutdown(self) -> None:
         """Shutdown audio controller."""
+        # Shutdown MQTT
         self.audio_client.loop_stop()
         self.audio_client.disconnect()
         print("\n👋 Audio controller shut down")
