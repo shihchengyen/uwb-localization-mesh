@@ -135,6 +135,17 @@ class DemoServerBringUp:
             "event": "server_started"
         }))
 
+    def adaptive_audio_demo(self):
+        """Start the adaptive audio demo in a background thread."""
+
+
+    def stop_adaptive_audio_demo(self):
+        """Stop the adaptive audio demo background thread."""
+
+    def _adaptive_audio_loop(self):
+        """Background loop for adaptive audio demo."""
+
+    
     def start_zone_dj_demo(self):
         """Start the zone DJ demo in a background thread."""
         if self._zone_dj_thread is not None and self._zone_dj_thread.is_alive():
