@@ -222,19 +222,6 @@ class AdaptiveAudioController:
         # Print status
         self._print_status()
 
-    def update_playlist_for_position(self, user_position: np.ndarray) -> None:
-        """
-        Update the playlist based on user position.
-        This is called by the server when position changes.
-
-        Args:
-            user_position: numpy array [x, y, z] in cm
-        """
-        # Update playlist based on position
-        self.song_queue = self.playlist_controller.update_playlist_based_on_position(user_position)
-
-        # Also update audio hardware positioning
-        self.update_position(user_position)
         
 
     def next_song(self) -> None:
@@ -252,6 +239,16 @@ class AdaptiveAudioController:
         pair = self.current_pair or "unknown"
         line = f"Pair:{pair:>5} | Vols -> R0:{vols[0]:3d}  R1:{vols[1]:3d}  R2:{vols[2]:3d}  R3:{vols[3]:3d}"
         print(f"\r{line}", end="", flush=True)
+
+    def set_playlist(self, playlist_number: int) -> None:
+        """
+        Set the current playlist by number (1-5).
+
+        Args:
+            playlist_number: Integer from 1-5 indicating which playlist to use
+        """
+        # Update playlist based on number
+        self.song_queue = self.playlist_controller.get_playlist(playlist_number)
     
     def start_all(self) -> None:
         """Start all speakers (manual control)."""

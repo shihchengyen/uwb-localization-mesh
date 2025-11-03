@@ -104,9 +104,6 @@ class DemoServerBringUp:
             daemon=True
         )
 
-        # Zone DJ thread control
-        self._zone_dj_stop_event = threading.Event()
-        self._zone_dj_thread = None
         
         logger.info(json.dumps({
             "event": "server_initialized",
@@ -134,6 +131,7 @@ class DemoServerBringUp:
         logger.info(json.dumps({
             "event": "server_started"
         }))
+    
 
     def adaptive_audio_demo(self):
         """Start the adaptive audio demo in a background thread."""
@@ -146,63 +144,19 @@ class DemoServerBringUp:
         """Background loop for adaptive audio demo."""
 
     
-    def start_zone_dj_demo(self):
-        """Start the zone DJ demo in a background thread."""
-        if self._zone_dj_thread is not None and self._zone_dj_thread.is_alive():
-            print("Zone DJ demo already running")
-            return
 
-        self._zone_dj_stop_event.clear()
-        self._zone_dj_thread = threading.Thread(target=self._zone_dj_loop, daemon=True)
-        self._zone_dj_thread.start()
-        print("🎵 Zone DJ demo started in background thread")
-
+    def set_playlist(self, playlist_number: int):
+        """Set the current playlist by number (1-5)."""
+        self.audio_server.set_playlist(playlist_number)
         logger.info(json.dumps({
-            "event": "zone_dj_started"
+            "event": "playlist_set",
+            "playlist_number": playlist_number
         }))
-
-    def stop_zone_dj_demo(self):
-        """Stop the zone DJ demo background thread."""
-        if self._zone_dj_thread is not None:
-            self._zone_dj_stop_event.set()
-            self._zone_dj_thread.join(timeout=2.0)
-            print("🎵 Zone DJ demo stopped")
-
-        logger.info(json.dumps({
-            "event": "zone_dj_stopped"
-        }))
-
-    def _zone_dj_loop(self):
-        """
-        Background loop for zone DJ functionality.
-        Continuously checks user position and updates audio.
-        """
-        while not self._zone_dj_stop_event.is_set():
-            try:
-                # Get current position (thread-safe)
-                user_position = None
-                with self._position_lock:
-                    if self.user_position is not None:
-                        user_position = self.user_position.copy()
-
-                if user_position is not None:
-                    # Update audio based on position
-                    self.audio_server.update_playlist_for_position(user_position)
-
-                # Small delay to prevent tight loop
-                time.sleep(0.1)
-
-            except Exception as e:
-                print(f"Error in zone DJ loop: {e}")
-                time.sleep(1)  # Longer delay on error
         
     def stop(self):
         """Stop all processing."""
         self._stop_event.set()
         self.uwb_mqtt_server.stop()
-
-        # Stop zone DJ demo if running
-        self.stop_zone_dj_demo()
 
         # Audio server shutdown
         self.audio_server.pause_all()

@@ -13,17 +13,27 @@ class PlaylistController:
         self.playlist4 = []
         self.playlist5 = []
 
-    def update_playlist_based_on_position(self, user_position: np.ndarray):
-        # takes in user position and updates the playlist based on the position 
-        # user_position is a numpy array [x, y, z] in cm (current stub implementation)
-        if user_position[1] > 300:
-            # shuffle the playlist2
-            random.shuffle(self.playlist2)
-            return self.playlist2
-        else:
+    def get_playlist(self, playlist_number: int):
+        """Returns the shuffled playlist by number (1-5)."""
+        if playlist_number == 1:
             random.shuffle(self.playlist1)
             return self.playlist1
-        
+        elif playlist_number == 2:
+            random.shuffle(self.playlist2)
+            return self.playlist2
+        elif playlist_number == 3:
+            random.shuffle(self.playlist3)
+            return self.playlist3
+        elif playlist_number == 4:
+            random.shuffle(self.playlist4)
+            return self.playlist4
+        elif playlist_number == 5:
+            random.shuffle(self.playlist5)
+            return self.playlist5
+        else:
+            # Default to playlist 1 if invalid number
+            random.shuffle(self.playlist1)
+            return self.playlist1
 
     def update_queue_with_random_song(self, playlist: list[str]):
         """
