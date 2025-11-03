@@ -67,7 +67,7 @@ class RPiAudioPlayer:
         
         print(f"🎵 RPi {rpi_id} Audio Player Ready")
         print(f"   WAV file: {wav_file}")
-        print(f"   Position: {'LEFT' if rpi_id == 1 else 'RIGHT'}")
+        print(f"   Position: {'LEFT' if rpi_id in [1, 2] else 'RIGHT'}")
         print(f"   Initial volume: {self.current_volume}%")
     
     def init_audio(self):
@@ -85,15 +85,79 @@ class RPiAudioPlayer:
             if not wav_path.exists():
                 raise FileNotFoundError(f"WAV file not found: {wav_path}")
             
-            # Load the audio file
-            pygame.mixer.music.load(str(wav_path))
+            # Load the audio file with stereo channel separation
+            self.load_stereo_channel(str(wav_path))
             self.audio_ready = True
             
-            print(f"✅ Audio initialized successfully")
+            channel_name = "LEFT" if self.rpi_id in [1, 2] else "RIGHT"
+            print(f"✅ Audio initialized successfully - Playing {channel_name} channel only")
             
         except Exception as e:
             print(f"❌ Audio initialization failed: {e}")
             self.audio_ready = False
+    
+    def load_stereo_channel(self, wav_path: str):
+        """Load only the left or right channel of the stereo audio file."""
+        import numpy as np
+        import wave
+        
+        # Read the WAV file
+        with wave.open(wav_path, 'rb') as wav_file:
+            frames = wav_file.readframes(wav_file.getnframes())
+            sample_rate = wav_file.getframerate()
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+        
+        if channels != 2:
+            # If not stereo, just load normally
+            pygame.mixer.music.load(wav_path)
+            return
+        
+        # Convert bytes to numpy array
+        if sample_width == 2:  # 16-bit
+            audio_data = np.frombuffer(frames, dtype=np.int16)
+        elif sample_width == 4:  # 32-bit
+            audio_data = np.frombuffer(frames, dtype=np.int32)
+        else:
+            # Fallback to normal loading
+            pygame.mixer.music.load(wav_path)
+            return
+        
+        # Reshape to separate left and right channels
+        audio_data = audio_data.reshape(-1, 2)
+        
+        # Select the appropriate channel
+        if self.rpi_id in [1, 2]:  # Left speakers - play left channel
+            channel_data = audio_data[:, 0]
+        else:  # Right speakers (0, 3) - play right channel
+            channel_data = audio_data[:, 1]
+        
+        # Convert back to mono by duplicating the channel
+        mono_data = np.column_stack((channel_data, channel_data))
+        
+        # Convert back to bytes
+        if sample_width == 2:  # 16-bit
+            mono_bytes = mono_data.astype(np.int16).tobytes()
+        elif sample_width == 4:  # 32-bit
+            mono_bytes = mono_data.astype(np.int32).tobytes()
+        
+        # Create a temporary WAV file with the selected channel
+        temp_wav_path = f"temp_channel_{self.rpi_id}.wav"
+        with wave.open(temp_wav_path, 'wb') as temp_wav:
+            temp_wav.setnchannels(2)  # Keep as stereo for pygame compatibility
+            temp_wav.setsampwidth(sample_width)
+            temp_wav.setframerate(sample_rate)
+            temp_wav.writeframes(mono_bytes)
+        
+        # Load the processed audio
+        pygame.mixer.music.load(temp_wav_path)
+        
+        # Clean up temporary file after loading
+        import os
+        try:
+            os.remove(temp_wav_path)
+        except:
+            pass
     
     def connect_mqtt(self):
         """Connect to MQTT broker and set up callbacks."""
@@ -176,22 +240,35 @@ class RPiAudioPlayer:
                 else:
                     print(f"🎵 Already playing at {self.current_volume}%")
             
+            elif command == "pause":
+                if self.is_playing:
+                    pygame.mixer.music.pause()
+                    self.is_playing = False
+                    print(f"⏸️  PAUSED at {self.current_volume}%")
+                else:
+                    print(f"⏸️  Already paused at {self.current_volume}%")
+            
+            elif command == "volume": # volume is set by the controller, but can be muted here (overridden with vol=0)
+                # Handle volume command from controller
+                target_volume = message.get("target_volume")
+                if target_volume is not None:
+                    old_volume = self.current_volume
+                    self.current_volume = max(0, min(100, int(target_volume)))
+                    pygame.mixer.music.set_volume(self.current_volume / 100.0)
+                    print(f"🔊 VOLUME: {old_volume}% → {self.current_volume}%")
+            
             elif command in ["left", "right"]:
                 old_volume = self.current_volume
                 
                 if command == "left":
-                    if self.rpi_id == 1:
-                        # Left speaker gets louder
+                    if self.rpi_id in [1, 2]:  # Left speakers get louder
                         self.current_volume = min(100, self.current_volume + 10)
-                    else:
-                        # Right speaker gets quieter
+                    else:  # Right speakers get quieter
                         self.current_volume = max(0, self.current_volume - 10)
                 else:  # command == "right"
-                    if self.rpi_id == 1:
-                        # Left speaker gets quieter
+                    if self.rpi_id in [1, 2]:  # Left speakers get quieter
                         self.current_volume = max(0, self.current_volume - 15)
-                    else:
-                        # Right speaker gets louder
+                    else:  # Right speakers get louder
                         self.current_volume = min(100, self.current_volume + 15)
                 
                 # Apply volume change
@@ -263,15 +340,17 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="RPi Audio Player")
-    parser.add_argument("--id", type=int, required=True, help="RPi ID (1=left, 2=right)")
+    parser.add_argument("--id", type=int, required=True, help="RPi ID (1,2=left; 0,3=right)")
     parser.add_argument("--wav", default="crazy-carls-brickhouse-tavern.wav", help="WAV file to play")
     parser.add_argument("--broker", default=DEFAULT_BROKER_IP, help="MQTT broker IP")
     
     args = parser.parse_args()
     
     # Validate RPi ID
-    if args.id not in [1, 2]:
-        print("❌ RPi ID must be 1 (left) or 2 (right)")
+    if args.id not in [0, 1, 2, 3]:
+        print("❌ RPi ID must be 0, 1, 2, or 3")
+        print("   RPi 1,2 = Left channel")
+        print("   RPi 0,3 = Right channel")
         sys.exit(1)
     
     player = RPiAudioPlayer(args.id, args.wav, args.broker)

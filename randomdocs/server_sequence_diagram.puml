@@ -1,0 +1,116 @@
+@startuml Server Bring-up Sequence Diagram
+
+title Server Bring-up Processing Sequence
+
+actor User
+participant ServerBringUp
+participant UWBMQTTServer
+participant SlidingWindowBinner
+participant PGOSolver
+
+== Initialization Phase ==
+User -> ServerBringUp: server = ServerBringUp(mqtt_config)
+activate ServerBringUp
+ServerBringUp -> ServerBringUp: __init__()
+ServerBringUp -> UWBMQTTServer: uwb_mqtt_server = UWBMQTTServer(config, _handle_measurement)
+ServerBringUp -> PGOSolver: _pgo_solver = PGOSolver()
+ServerBringUp -> ServerBringUp: create anchor_config, pre-compute anchor edges
+ServerBringUp -> ServerBringUp: initialize per-phone data structures
+deactivate ServerBringUp
+
+== Startup Phase ==
+User -> ServerBringUp: server.start()
+activate ServerBringUp
+ServerBringUp -> UWBMQTTServer: start()
+activate UWBMQTTServer
+UWBMQTTServer -> UWBMQTTServer: connect to MQTT broker
+UWBMQTTServer -> UWBMQTTServer: subscribe to "uwb/anchor/+/vector"
+deactivate UWBMQTTServer
+
+ServerBringUp -> ServerBringUp: start _processor_thread
+activate ServerBringUp #LightGreen
+note right: Background processing thread starts
+deactivate ServerBringUp
+deactivate ServerBringUp
+
+== Main Processing Loop (in background thread) ==
+loop Processing Loop (~every 10ms)
+    ServerBringUp -> ServerBringUp: check all phone_ids in _measurements queue
+    ServerBringUp -> SlidingWindowBinner: create_binned_data(phone_id)
+    activate SlidingWindowBinner
+    SlidingWindowBinner -> SlidingWindowBinner: aggregate measurements in 1s time window
+    SlidingWindowBinner --> ServerBringUp: return BinnedData or None
+    deactivate SlidingWindowBinner
+
+    alt Binned data available
+        ServerBringUp -> ServerBringUp: create phone-anchor edges from binned data
+        ServerBringUp -> PGOSolver: solve(nodes, edges + anchor_edges, true_nodes)
+        activate PGOSolver
+        PGOSolver -> PGOSolver: nonlinear least squares optimization
+        PGOSolver -> PGOSolver: apply anchoring transformation
+        PGOSolver --> ServerBringUp: return PGOResult
+        deactivate PGOSolver
+
+        ServerBringUp -> ServerBringUp: update user_position
+        ServerBringUp -> ServerBringUp: update data[phone_id] with latest binned data
+        ServerBringUp -> ServerBringUp: log position update with metrics
+    end
+end
+
+== Measurement Reception (via MQTT callback) ==
+UWBMQTTServer -> ServerBringUp: _handle_measurement(Measurement)
+activate ServerBringUp
+ServerBringUp -> SlidingWindowBinner: add_measurement(measurement)
+activate SlidingWindowBinner
+SlidingWindowBinner -> SlidingWindowBinner: validate measurement\n(outlier detection, variance checks)
+SlidingWindowBinner --> ServerBringUp: return accepted/rejected
+deactivate SlidingWindowBinner
+
+alt Measurement accepted
+    ServerBringUp -> ServerBringUp: queue measurement for processing
+    note right: Added to _measurements[phone_id] queue
+else Measurement rejected
+    ServerBringUp -> ServerBringUp: log rejection reason and update metrics
+end
+deactivate ServerBringUp
+
+== Shutdown Phase ==
+User -> ServerBringUp: server.stop()
+activate ServerBringUp
+ServerBringUp -> ServerBringUp: set _stop_event
+ServerBringUp -> UWBMQTTServer: stop()
+activate UWBMQTTServer
+UWBMQTTServer -> UWBMQTTServer: disconnect from MQTT
+deactivate UWBMQTTServer
+ServerBringUp -> ServerBringUp: wait for _processor_thread to finish
+deactivate ServerBringUp
+
+== Key Data Structures ==
+note over ServerBringUp
+**ServerBringUp State:**
+- data: Dict[int, BinnedData] (latest per phone)
+- user_position: current position estimate
+- _measurements: Dict[int, Queue[Measurement]] (per-phone queues)
+- _filtered_binners: Dict[int, SlidingWindowBinner] (per-phone binners)
+- _anchor_edges: pre-computed anchor-anchor edges
+- uwb_mqtt_server: UWBMQTTServer instance
+- _processor_thread: background processing thread
+end note
+
+note over SlidingWindowBinner
+**SlidingWindowBinner:**
+- measurements_buffer: sliding window deque
+- metrics: BinningMetrics (rejection stats)
+- window_size_seconds: 1.0s default
+- Filters: statistical outliers, variance checks
+end note
+
+note over PGOSolver
+**PGOSolver:**
+- max_iterations: 100
+- convergence_threshold: 1e-6
+- method: 'trf' (Levenberg-Marquardt)
+- Anchors to ground truth positions
+end note
+
+@enduml
