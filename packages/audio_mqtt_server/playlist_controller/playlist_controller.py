@@ -24,3 +24,11 @@ class PlaylistController:
             random.shuffle(self.playlist1)
             return self.playlist1
         
+
+    def update_queue_with_random_song(self, playlist: list[str]):
+        """
+        Queues a random song from combination of all playlists
+        """
+        combined_playlist = self.playlist1 + self.playlist2 + self.playlist3 + self.playlist4 + self.playlist5
+        random.shuffle(combined_playlist)
+        return combined_playlist
