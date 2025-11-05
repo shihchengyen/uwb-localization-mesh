@@ -8,11 +8,14 @@ import logging
 import threading
 import time
 import math
+import datetime
 from collections import defaultdict
 from queue import Queue
 from typing import Dict, Optional, Union
 
 import numpy as np
+import uuid
+import paho.mqtt.client as mqtt
 
 from packages.datatypes.datatypes import Measurement, BinnedData, AnchorConfig
 from packages.localization_algos.binning.sliding_window import SlidingWindowBinner, BinningMetrics
@@ -20,6 +23,15 @@ from packages.localization_algos.edge_creation.transforms import create_relative
 from packages.localization_algos.edge_creation.anchor_edges import create_anchor_anchor_edges
 from packages.localization_algos.pgo.solver import PGOSolver
 from packages.uwb_mqtt_server.config import MQTTConfig
+try:
+    from packages.audio_mqtt_server.adaptive_audio_controller import AdaptiveAudioController as AdaptiveAudioServer, clamp
+except ImportError:
+    # Fallback if audio server is not available
+    AdaptiveAudioServer = None
+    def clamp(value: float, lo: int = 0, hi: int = 100) -> int:
+        """Clamp value between lo and hi."""
+        v = int(round(value))
+        return max(lo, min(hi, v))
 
 # Setup JSON logging
 logging.basicConfig(
@@ -28,10 +40,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class DummyServerBringUp:
+# Defaults
+DEFAULT_BROKER_IP = "localhost"
+DEFAULT_BROKER_PORT = 1884
+DEFAULT_USERNAME = "laptop"
+DEFAULT_PASSWORD = "laptop"
+
+class DummyServerBringUpProMax:
     """
     Dummy server that simulates user movement and generates fake measurements.
-    Uses the same processing pipeline as the real ServerBringUp.
+    Uses the same processing pipeline as the real ServerBringUpProMax.
+    Includes audio control functionality for testing demos.
     """
 
     def __init__(
@@ -63,6 +82,7 @@ class DummyServerBringUp:
         # Latest state
         self.data: Dict[int, BinnedData] = {}  # phone_node_id -> latest binned data
         self.user_position: Optional[np.ndarray] = None  # User position
+        self._position_lock = threading.Lock()  # Thread-safe access to user_position
 
         # Processing settings
         self.window_size_seconds = window_size_seconds
@@ -82,6 +102,44 @@ class DummyServerBringUp:
 
         # Pre-compute anchor-anchor edges
         self._anchor_edges = create_anchor_anchor_edges(self.anchor_config)
+        
+        # Audio server (dummy mode - no actual MQTT connection)
+        if mqtt_config and AdaptiveAudioServer:
+            try:
+                self.adaptive_audio_server = AdaptiveAudioServer(
+                    broker=mqtt_config.broker,
+                    port=mqtt_config.port
+                )
+            except Exception as e:
+                logger.warning(json.dumps({
+                    "event": "audio_server_init_failed",
+                    "error": str(e)
+                }))
+                self.adaptive_audio_server = None
+        else:
+            self.adaptive_audio_server = None
+        
+        # Audio MQTT setup (dummy mode - create but don't connect)
+        if mqtt_config:
+            client_id = f"dummy_server_bring_up_pro_max_{uuid.uuid4()}"
+            self.audio_client = mqtt.Client(client_id=client_id)
+            self.audio_client.username_pw_set(username=DEFAULT_USERNAME, password=DEFAULT_PASSWORD)
+            self.audio_topic = "audio/commands"
+            
+            # State of speakers (dummy mode)
+            self.current_pair: Optional[str] = None  # "front" or "back"
+            self.started_for_pair: Optional[str] = None
+            self.volumes = {0: 70, 1: 70, 2: 70, 3: 70}
+            self._last_position = None
+            
+            print("🎛️ Dummy Follow-Me Audio Server initialized (no MQTT connection)")
+        else:
+            self.audio_client = None
+            self.audio_topic = None
+            self.current_pair = None
+            self.started_for_pair = None
+            self.volumes = {}
+            self._last_position = None
 
         # Simulation state
         self._simulation_thread: Optional[threading.Thread] = None
@@ -227,9 +285,192 @@ class DummyServerBringUp:
         if self._simulation_thread:
             self._simulation_thread.join(timeout=1.0)
 
+        # Audio server shutdown (if initialized)
+        if self.adaptive_audio_server:
+            self.adaptive_audio_server.pause_all()
+            self.adaptive_audio_server.shutdown()
+
+        # Audio MQTT cleanup (if initialized)
+        if self.audio_client:
+            self.audio_client.loop_stop()
+            self.audio_client.disconnect()
+
         logger.info(json.dumps({
             "event": "dummy_server_stopped"
         }))
+
+    def adaptive_audio_demo(self):
+        """Start the adaptive audio demo in a background thread."""
+        if self.adaptive_audio_server:
+            with self._position_lock:
+                position = self.user_position
+            if position is not None:
+                self.adaptive_audio_server.start_all()
+                logger.info(json.dumps({
+                    "event": "adaptive_audio_demo_started",
+                    "dummy_mode": True
+                }))
+            else:
+                logger.warning(json.dumps({
+                    "event": "adaptive_audio_demo_failed",
+                    "reason": "no_position_available"
+                }))
+        else:
+            logger.info(json.dumps({
+                "event": "adaptive_audio_demo_skipped",
+                "reason": "no_mqtt_config"
+            }))
+
+    def stop_adaptive_audio_demo(self):
+        """Stop the adaptive audio demo background thread."""
+        if self.adaptive_audio_server:
+            self.adaptive_audio_server.pause_all()
+            logger.info(json.dumps({
+                "event": "adaptive_audio_demo_stopped",
+                "dummy_mode": True
+            }))
+
+    def _adaptive_audio_loop(self):
+        """Background loop for adaptive audio demo (dummy implementation)."""
+        # In dummy mode, this would simulate audio adjustments based on position
+        pass
+    
+    def zone_dj_demo(self):
+        """Start the zone DJ demo in a background thread."""
+        if self.adaptive_audio_server:
+            # Zone DJ functionality not available in AdaptiveAudioController
+            # Simulate by starting all speakers at 70% volume
+            try:
+                self.adaptive_audio_server.start_all()
+                logger.info(json.dumps({
+                    "event": "zone_dj_demo_started",
+                    "dummy_mode": True,
+                    "note": "simulated_via_start_all"
+                }))
+            except AttributeError:
+                logger.info(json.dumps({
+                    "event": "zone_dj_demo_simulated",
+                    "dummy_mode": True,
+                    "reason": "method_not_available"
+                }))
+        else:
+            logger.info(json.dumps({
+                "event": "zone_dj_demo_skipped",
+                "reason": "no_audio_server"
+            }))
+
+    def stop_zone_dj_demo(self):
+        """Stop the zone DJ demo background thread."""
+        if self.adaptive_audio_server:
+            try:
+                self.adaptive_audio_server.pause_all()
+                logger.info(json.dumps({
+                    "event": "zone_dj_demo_stopped",
+                    "dummy_mode": True
+                }))
+            except AttributeError:
+                logger.info(json.dumps({
+                    "event": "zone_dj_demo_stop_simulated",
+                    "dummy_mode": True,
+                    "reason": "method_not_available"
+                }))
+
+    def set_playlist(self, playlist_number: int):
+        """Set the current playlist by number (1-5)."""
+        if self.adaptive_audio_server:
+            self.adaptive_audio_server.set_playlist(playlist_number)
+            logger.info(json.dumps({
+                "event": "playlist_set",
+                "playlist_number": playlist_number,
+                "dummy_mode": True
+            }))
+        else:
+            logger.info(json.dumps({
+                "event": "playlist_set_skipped",
+                "playlist_number": playlist_number,
+                "reason": "no_mqtt_config"
+            }))
+
+    def _publish(self, topic: str, payload_obj: dict) -> None:
+        """Dummy implementation of MQTT publish (logs instead of sending)."""
+        if self.audio_client:
+            payload = json.dumps(payload_obj, separators=(",", ":"))
+            logger.info(json.dumps({
+                "event": "dummy_mqtt_publish",
+                "topic": topic,
+                "payload": payload_obj
+            }))
+        
+    def _apply_state(self, pair: str, left_vol: int, right_vol: int) -> None:
+        """Dummy implementation of speaker state application."""
+        logger.info(json.dumps({
+            "event": "dummy_apply_state",
+            "pair": pair,
+            "left_volume": left_vol,
+            "right_volume": right_vol
+        }))
+        
+        if pair == "front":
+            # Active: speakers 2 (LEFT), 3 (RIGHT). Inactive: 0,1
+            if self.started_for_pair != pair:
+                logger.info(json.dumps({
+                    "event": "dummy_speaker_start",
+                    "speakers": [0, 1, 2, 3],
+                    "pair": pair
+                }))
+                self.started_for_pair = pair
+
+            # Simulate setting active volumes
+            if self.volumes:
+                self.volumes[2] = left_vol
+                self.volumes[3] = right_vol
+                self.volumes[0] = 0
+                self.volumes[1] = 0
+
+        else:  # back
+            # Active: speakers 1 (LEFT), 0 (RIGHT). Inactive: 2,3
+            if self.started_for_pair != pair:
+                logger.info(json.dumps({
+                    "event": "dummy_speaker_start",
+                    "speakers": [0, 1, 2, 3],
+                    "pair": pair
+                }))
+                self.started_for_pair = pair
+
+            if self.volumes:
+                self.volumes[1] = left_vol
+                self.volumes[0] = right_vol
+                self.volumes[2] = 0
+                self.volumes[3] = 0
+
+        self.current_pair = pair
+
+    def _send_audio_command(self, command: str, rpi_id: Optional[int] = None, volume: Optional[int] = None) -> None:
+        """Dummy implementation of audio command sending."""
+        now = time.time()
+        execute_time = now + 0.5  # 500ms lookahead
+        msg = {
+            "command": command,
+            "execute_time": execute_time,
+            "global_time": now,
+            "delay_ms": 500,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "rpi_id": rpi_id,
+            "command_id": str(uuid.uuid4()),
+        }
+        if volume is not None:
+            msg["target_volume"] = clamp(volume) if 'clamp' in globals() else max(0, min(100, volume))
+
+        if rpi_id is None:
+            topic = f"{self.audio_topic}/broadcast" if self.audio_topic else "audio/commands/broadcast"
+        else:
+            topic = f"{self.audio_topic}/rpi_{rpi_id}" if self.audio_topic else f"audio/commands/rpi_{rpi_id}"
+        
+        self._publish(topic, msg)
+
+        # Track local volume state (for live monitoring)
+        if command == "volume" and rpi_id is not None and volume is not None and self.volumes:
+            self.volumes[rpi_id] = clamp(volume) if 'clamp' in globals() else max(0, min(100, volume))
 
     def _handle_measurement(self, measurement: Measurement):
         """
@@ -320,8 +561,9 @@ class DummyServerBringUp:
                             )
 
                             if pgo_result.success:
-                                # Update user position from anchored results
-                                self.user_position = pgo_result.node_positions[f'phone_{phone_id}']
+                                # Update user position from anchored results (thread-safe)
+                                with self._position_lock:
+                                    self.user_position = pgo_result.node_positions[f'phone_{phone_id}']
 
                                 logger.info(json.dumps({
                                     "event": "position_updated",
@@ -367,7 +609,7 @@ if __name__ == "__main__":
     }))
 
     # Start dummy server
-    server = DummyServerBringUp(
+    server = DummyServerBringUpProMax(
         simulation_speed=args.speed,
         phone_node_id=args.phone_id
     )

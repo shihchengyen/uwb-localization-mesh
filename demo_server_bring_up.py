@@ -7,12 +7,15 @@ import json
 import logging
 import threading
 import time
+import datetime
+from datetime import timezone
 from collections import defaultdict
 from queue import Queue
 from typing import Dict, Optional, Union
 
 import numpy as np
-
+import uuid
+import paho.mqtt.client as mqtt
 from packages.datatypes.datatypes import Measurement, BinnedData, AnchorConfig
 from packages.localization_algos.binning.sliding_window import SlidingWindowBinner, BinningMetrics
 from packages.localization_algos.edge_creation.transforms import create_relative_measurement
@@ -20,7 +23,7 @@ from packages.localization_algos.edge_creation.anchor_edges import create_anchor
 from packages.localization_algos.pgo.solver import PGOSolver
 from packages.uwb_mqtt_server.server import UWBMQTTServer
 from packages.uwb_mqtt_server.config import MQTTConfig
-from packages.audio_mqtt_server.adaptive_audio_controller import AdaptiveAudioController
+from packages.audio_mqtt_server.adaptive_audio_controller import AdaptiveAudioController as AdaptiveAudioServer, clamp
 
 # Setup JSON logging
 logging.basicConfig(
@@ -29,7 +32,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class DemoServerBringUp:
+
+# Defaults
+DEFAULT_BROKER_IP = "localhost"
+DEFAULT_BROKER_PORT = 1884
+DEFAULT_USERNAME = "laptop"
+DEFAULT_PASSWORD = "laptop"
+
+class ServerBringUpProMax:
     """
     Central server that coordinates:
     1. MQTT measurement ingestion
@@ -54,7 +64,6 @@ class DemoServerBringUp:
             2: np.array([480, 0, 0]),    # bottom-right
             3: np.array([0, 0, 0])       # bottom-left (origin in XY, but at sensor height in Z)
         }
-        
         # Working copy of nodes that can be jittered (jittering temporarily disabled)
         self.nodes = self.true_nodes.copy()
         self.jitter_std = jitter_std
@@ -84,18 +93,36 @@ class DemoServerBringUp:
         # Pre-compute anchor-anchor edges
         self._anchor_edges = create_anchor_anchor_edges(self.anchor_config)
         
+        # Audio server
+        self.adaptive_audio_server = AdaptiveAudioServer(broker=mqtt_config.broker, port=mqtt_config.port)
+        
+
+        """Initialize audio server with MQTT connection."""
+        
+        # Audio MQTT setup
+        client_id = f"server_bring_up_pro_max_{uuid.uuid4()}"
+        self.audio_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
+        self.audio_client.username_pw_set(username=DEFAULT_USERNAME, password=DEFAULT_PASSWORD)
+
+        self.audio_topic = "audio/commands"
+
         # Start MQTT server
         self.uwb_mqtt_server = UWBMQTTServer(
             config=mqtt_config,
             on_measurement=self._handle_measurement
         )
 
-        # Start audio server
-        self.audio_server = AdaptiveAudioController(
-            broker=mqtt_config.broker,
-            port=mqtt_config.port
-        )
+        # State of speakers
+        self.current_pair: Optional[str] = None  # "front" or "back"
+        self.started_for_pair: Optional[str] = None
+        self.volumes = {0: 70, 1: 70, 2: 70, 3: 70}
+        self._last_position = None
 
+        # Connect MQTT for audio
+        self.audio_client.connect(mqtt_config.broker, mqtt_config.port, mqtt_config.keepalive)
+        self.audio_client.loop_start()
+        
+        print("🎛️ Follow-Me Audio Server initialized")
 
         # Processing thread control
         self._stop_event = threading.Event()
@@ -103,7 +130,6 @@ class DemoServerBringUp:
             target=self._process_measurements,
             daemon=True
         )
-
         
         logger.info(json.dumps({
             "event": "server_initialized",
@@ -120,6 +146,10 @@ class DemoServerBringUp:
                 )
             return self._filtered_binners[phone_id]
         
+    def _publish(self, topic: str, payload_obj: dict) -> None:
+        payload = json.dumps(payload_obj, separators=(",", ":"))
+        self.audio_client.publish(topic, payload, qos=1)
+                
     def start(self):
         """Start the server and processing thread."""
         # Start MQTT
@@ -132,22 +162,34 @@ class DemoServerBringUp:
             "event": "server_started"
         }))
     
-
     def adaptive_audio_demo(self):
         """Start the adaptive audio demo in a background thread."""
+        with self._position_lock:
+            position = self.user_position
+        if position is not None:
+            self.adaptive_audio_server.start_all()
 
 
     def stop_adaptive_audio_demo(self):
         """Stop the adaptive audio demo background thread."""
+        self.adaptive_audio_server.pause_all()
 
     def _adaptive_audio_loop(self):
         """Background loop for adaptive audio demo."""
-
     
+    def zone_dj_demo(self):
+        """Start the zone DJ demo in a background thread."""
+        # play 70% at all speakers
+        self.adaptive_audio_server.zone_dj_start()
+
+    def stop_zone_dj_demo(self):
+        """Stop the zone DJ demo background thread."""
+        self.adaptive_audio_server.zone_dj_pause()
+
 
     def set_playlist(self, playlist_number: int):
         """Set the current playlist by number (1-5)."""
-        self.audio_server.set_playlist(playlist_number)
+        self.adaptive_audio_server.set_playlist(playlist_number)
         logger.info(json.dumps({
             "event": "playlist_set",
             "playlist_number": playlist_number
@@ -159,8 +201,9 @@ class DemoServerBringUp:
         self.uwb_mqtt_server.stop()
 
         # Audio server shutdown
-        self.audio_server.pause_all()
-        self.audio_server.shutdown()
+        self.adaptive_audio_server.pause_all()
+        self.adaptive_audio_server.shutdown()
+        self.adaptive_audio_server.shutdown()
 
         logger.info(json.dumps({
             "event": "server_stopped"
@@ -313,6 +356,70 @@ class DemoServerBringUp:
             # Sleep briefly to prevent tight loop
             time.sleep(0.01)
 
+
+    def _apply_state(self, pair: str, left_vol: int, right_vol: int) -> None:
+        """Send MQTT commands to apply the given pair and volumes."""
+        """Calls _send_audio_command for each speaker."""
+        if pair == "front":
+            # Active: speakers 2 (LEFT), 3 (RIGHT). Inactive: 0,1
+            # Ensure active pair is started at least once
+            if self.started_for_pair != pair:
+                # Unmute all first to ensure START is heard
+                for r in [0, 1, 2, 3]:
+                    self._send_audio_command("volume", rpi_id=r, volume=70)
+                for r in [0, 1, 2, 3]:
+                    self._send_audio_command("start", rpi_id=r)
+                self.started_for_pair = pair
+
+            # Set active volumes
+            self._send_audio_command("volume", rpi_id=2, volume=left_vol)
+            self._send_audio_command("volume", rpi_id=3, volume=right_vol)
+            # Mute inactive
+            self._send_audio_command("volume", rpi_id=0, volume=0)
+            self._send_audio_command("volume", rpi_id=1, volume=0)
+
+        else:  # back
+            # Active: speakers 1 (LEFT), 0 (RIGHT). Inactive: 2,3
+            if self.started_for_pair != pair:
+                for r in [0, 1, 2, 3]:
+                    self._send_audio_command("volume", rpi_id=r, volume=70)
+                for r in [0, 1, 2, 3]:
+                    self._send_audio_command("start", rpi_id=r)
+                self.started_for_pair = pair
+
+            self._send_audio_command("volume", rpi_id=1, volume=left_vol)
+            self._send_audio_command("volume", rpi_id=0, volume=right_vol)
+            # Mute inactive
+            self._send_audio_command("volume", rpi_id=2, volume=0)
+            self._send_audio_command("volume", rpi_id=3, volume=0)
+
+        self.current_pair = pair
+
+    def _send_audio_command(self, command: str, rpi_id: Optional[int] = None, volume: Optional[int] = None) -> None:
+        now = time.time()
+        execute_time = now + 0.5  # 500ms lookahead
+        msg = {
+            "command": command,
+            "execute_time": execute_time,
+            "global_time": now,
+            "delay_ms": 500,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "rpi_id": rpi_id,
+            "command_id": str(uuid.uuid4()),
+        }
+        if volume is not None:
+            msg["target_volume"] = clamp(volume)
+
+        if rpi_id is None:
+            topic = f"{self.audio_topic}/broadcast"
+        else:
+            topic = f"{self.audio_topic}/rpi_{rpi_id}"
+        self._publish(topic, msg)
+
+        # Track local volume state (for live monitoring)
+        if command == "volume" and rpi_id is not None and volume is not None:
+            self.volumes[rpi_id] = clamp(volume)
+
 if __name__ == "__main__":
     import argparse
     
@@ -336,7 +443,7 @@ if __name__ == "__main__":
     }))
     
     # Start server (jitter temporarily disabled)
-    server = DemoServerBringUp(
+    server = ServerBringUpProMax(
         mqtt_config=mqtt_config,
         jitter_std=0.0  # Jittering disabled
     )
