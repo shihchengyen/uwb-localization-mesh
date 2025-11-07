@@ -18,10 +18,10 @@ This document outlines the overall architecture for the **Application Layer** of
 
 **Data Flow:**
 
-- MainWindow creates and starts `DummyServerBringUpProMax` instance
-- QTimer (20Hz) polls `server.user_position` attribute directly
-- Position data converted from cm to meters
-- `AppBus.pointerUpdated` signal emitted to all widgets
+- **Inbound (Server → Widgets)**: MainWindow polls `server.user_position`, emits `AppBus.pointerUpdated` to widgets
+- **Outbound (Widgets → Server)**: Widgets emit audio commands to AppBus, MainWindow routes to server methods
+- **Cross-Widget**: Widgets emit event callbacks to AppBus for inter-widget communication
+- **Thread Safety**: Qt signal system ensures all server calls happen on main thread
 - Self-contained Python application (no external brokers needed)
 
 **Core Features:**
@@ -32,28 +32,68 @@ This document outlines the overall architecture for the **Application Layer** of
 - ✅ FloorplanView (homography, zones, pointer tracking)
 - ✅ DummyServer simulation (figure-8 pattern)
 - ✅ Audio demo methods (`adaptive_audio_demo()`, `zone_dj_demo()`, `set_playlist()`)
-- ✅ Widgets call server methods directly via services dict
-- ✅ Thread-safe attribute access with locks
+- ✅ AppBus signal routing for ALL communication (position, commands, events)
+- ✅ Thread-safe via Qt signal system (automatic main thread delivery)
+- ✅ MainWindow routes AppBus signals to server methods
+- ✅ Cross-widget communication via AppBus event callbacks
 - ✅ Status bar showing position and server status
 
 **Implementation Notes:**
 
 - Audio control is simulated (commands are logged only)
 - No external hardware integration in this design
-- Direct method calls for audio control (no message broker)
-- Position data via direct attribute polling (no pub/sub)
+- ALL communication flows through AppBus (consistent pattern)
+- Position data via polling + Qt signals
+- Audio commands via Qt signals + MainWindow routing
 
-**Thread Safety Limitations:**
+**Thread Safety (Solved via AppBus):**
 
-- ⚠️ Audio methods should only be called from the main Qt thread
-- Direct calls to `server.adaptive_audio_demo()` etc. are convenient but lack explicit thread safety
-- Audio state variables in DummyServer (e.g., `self.volumes`, `self.current_pair`) are not protected by locks
-- For production use, consider using Qt signals or adding locks to audio methods
-- Current implementation is adequate for demonstration/development purposes
+- ✅ **Recommended**: Route all audio commands through AppBus signals
+- ✅ MainWindow receives AppBus signals on main thread, then calls server methods
+- ✅ Qt signal system automatically ensures thread-safe delivery
+- ✅ Audio state variables in DummyServer accessed only from main thread
+- ✅ No locks needed when using AppBus pattern
+- ⚠️ **Deprecated**: Direct widget→server calls (bypasses AppBus, not thread-safe if called from timers/threads)
 
 ---
 
 ## 1. System Overview
+
+### 1.0 Package Structure
+
+The application follows a strict hierarchical structure with NO duplication:
+
+```
+packages/
+├── mini_player/                    # SHARED SUBWIDGET (single implementation)
+│   └── mini_player.py             # Compact audio player UI component
+│
+├── viz_floorplan/                  # SHARED SUBWIDGET (single implementation)
+│   └── floorplan_view.py          # Floorplan visualization with homography
+│
+├── adaptive_audio_widget/          # WIDGET LAYER
+│   └── adaptive_audio_widget.py   # Instantiates: viz_floorplan, mini_player
+│
+├── zone_dj_widget/                 # WIDGET LAYER
+│   └── zone_dj_widget.py          # Instantiates: viz_floorplan, mini_player
+│
+├── pgo_data_widget/                # WIDGET LAYER
+│   └── pgo_plot_widget.py         # Real-time position plotting
+│
+└── [other packages: datatypes, localization_algos, etc.]
+
+Demos/
+└── UnifiedDemo/
+    └── main_demo.py                # TOP LAYER (MainWindow)
+                                    # Instantiates all widgets
+```
+
+**Critical Rules:**
+
+1. ❌ NO `adaptive_audio_widget/mini_player.py` 
+2. ❌ NO `zone_dj_widget/mini_player.py`
+3. ✅ Only ONE `packages/mini_player/mini_player.py`
+4. ✅ Widgets import and instantiate with different parameters
 
 ### 1.1 High-Level Architecture
 
@@ -128,25 +168,63 @@ This document outlines the overall architecture for the **Application Layer** of
 
                        ARCHITECTURE NOTES:
           ┌─────────────────────────────────────────────┐
-          │  Direct attribute polling (no broker)       │
+          │  Direct attribute polling for position      │
+          │  AppBus signals for ALL commands/events     │
           │  DummyServer runs in same Python process    │
-          │  Thread-safe attribute access with locks    │
-          │  Direct method calls for audio control      │
+          │  Thread-safe: Qt signals + attribute locks  │
+          │  MainWindow routes AppBus → Server calls    │
           └─────────────────────────────────────────────┘
 ```
 
 ### 1.2 Component Responsibilities
 
-| Component                    | Responsibility                                         | Dependencies                                   |
-| ---------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
-| **MainWindow**               | Application shell, server polling, widget coordination | QApplication, AppBus, DummyServerBringUpProMax |
-| **AppBus**                   | Event routing, decoupling widgets from data source     | Qt Core (QObject, Signal)                      |
-| **SettingsService**          | Configuration management                               | QSettings                                      |
-| **PgoPlotWidget**            | Real-time position plotting, diagnostics               | AppBus, matplotlib/pyqtgraph                   |
-| **AdaptiveAudioWidget**      | Fixed 2-zone follow-me visualization + audio control   | AppBus, viz_floorplan, server instance         |
-| **ZoneDjWidget**             | User-defined zones + audio control                     | AppBus, viz_floorplan, server instance         |
-| **FloorplanView**            | Floorplan visualization, homography, zones             | PyQt5, OpenCV, numpy                           |
-| **DummyServerBringUpProMax** | UWB simulation, PGO processing, audio demo simulation  | numpy, scipy, packages.*                       |
+| Component                    | Responsibility                                         | Dependencies                                   | Layer          |
+| ---------------------------- | ------------------------------------------------------ | ---------------------------------------------- | -------------- |
+| **MainWindow (main_demo)**   | Application shell, server polling, widget coordination | QApplication, AppBus, DummyServerBringUpProMax | Top Layer      |
+| **AppBus**                   | Event routing, decoupling widgets from data source     | Qt Core (QObject, Signal)                      | Infrastructure |
+| **SettingsService**          | Configuration management                               | QSettings                                      | Infrastructure |
+| **PgoPlotWidget**            | Real-time position plotting, diagnostics               | AppBus, matplotlib/pyqtgraph                   | Widget Layer   |
+| **AdaptiveAudioWidget**      | Fixed 2-zone follow-me visualization + audio control   | AppBus, viz_floorplan, mini_player             | Widget Layer   |
+| **ZoneDjWidget**             | User-defined zones + audio control                     | AppBus, viz_floorplan, mini_player             | Widget Layer   |
+| **FloorplanView**            | Floorplan visualization, homography, zones             | PyQt5, OpenCV, numpy                           | Subwidget      |
+| **MiniPlayer**               | Compact audio player UI (shared component)             | PyQt5                                          | Subwidget      |
+| **DummyServerBringUpProMax** | UWB simulation, PGO processing, audio demo simulation  | numpy, scipy, packages.*                       | Data Source    |
+
+### 1.3 Component Hierarchy
+
+The application follows a three-layer widget architecture:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  TOP LAYER: main_demo.py (MainWindow)                           │
+│  - Creates widgets, passes data down                            │
+│  - Polls DummyServerBringUp, emits AppBus signals               │
+│  - Receives widget callbacks/events, routes to server           │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓ data flow
+                              ↑ events/callbacks
+┌─────────────────────────────────────────────────────────────────┐
+│  WIDGET LAYER: adaptive_audio_widget, zone_dj_widget, pgo_data │
+│  - Implement specific visualization/interaction paradigms       │
+│  - Invoke subwidgets with specific parameters                   │
+│  - Emit events back to main_demo                                │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓ instantiate & configure
+                              ↑ UI events
+┌─────────────────────────────────────────────────────────────────┐
+│  SUBWIDGET LAYER: viz_floorplan, mini_player (SHARED)          │
+│  - Reusable UI components (NO duplication)                      │
+│  - Parameterized by parent widgets                              │
+│  - Single implementation per component                          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key Principles:**
+
+- **No Duplication**: `mini_player` and `viz_floorplan` are single shared implementations
+- **Parameterization**: Widgets configure subwidgets with specific parameters
+- **Data Down, Events Up**: Data flows down the hierarchy, events/callbacks flow up
+- **Clear Separation**: Each layer has distinct responsibilities
 
 ---
 
@@ -160,45 +238,125 @@ The **AppBus** is a Qt signal hub that implements a publish-subscribe pattern fo
 
 ```python
 class AppBus(QObject):
-    # Position updates (from DummyServerBringUp via polling)
+    # ============================================================
+    # POSITION & TRACKING DATA (Server → Widgets)
+    # ============================================================
     pointerUpdated = Signal(float, float, float, str)  # x_m, y_m, ts, source
 
-    # Zone events (from widgets)
+    # ============================================================
+    # ZONE EVENTS (Widgets → AppBus → Logging/Status)
+    # ============================================================
     zoneRegistered = Signal(object, float, float, float, str)  # idx, x_m, y_m, ts, source
     zoneDeregistered = Signal(object, float, float, float, str)
+    zoneSelected = Signal(object)  # zone object
+    zoneCreated = Signal(object)  # zone object
+    zoneDeleted = Signal(object)  # zone object
+    zoneMoved = Signal(object, float, float)  # zone, new_x, new_y
 
-    # Server status
-    serverStatusChanged = Signal(str)  # "running", "stopped", "error"
+    # ============================================================
+    # PLAYBACK CONTROL COMMANDS (Widgets → MainWindow → Server)
+    # ============================================================
+    playRequested = Signal(str)           # source widget_id
+    pauseRequested = Signal(str)          # source widget_id
+    stopRequested = Signal(str)           # source widget_id
+    skipRequested = Signal(str)           # source widget_id (next track)
+    previousRequested = Signal(str)       # source widget_id (previous track)
+    seekRequested = Signal(str, float)    # source, position (0.0-1.0)
+
+    # ============================================================
+    # AUDIO MODE COMMANDS (Widgets → MainWindow → Server)
+    # ============================================================
+    audioStartRequested = Signal(str, dict)  # mode ("adaptive"|"zone_dj"), params
+    audioStopRequested = Signal(str)  # mode ("adaptive"|"zone_dj")
+    adaptiveAudioEnabled = Signal(bool)   # enable/disable adaptive audio
+    zoneDjEnabled = Signal(bool)          # enable/disable zone DJ
+    bypassAudioRequested = Signal(bool)   # bypass all audio processing
+
+    # ============================================================
+    # PLAYLIST & VOLUME COMMANDS (Widgets → MainWindow → Server)
+    # ============================================================
+    playlistChangeRequested = Signal(int)  # playlist_number (1-5)
+    playlistSelected = Signal(int)         # playlist_id
+    shuffleToggled = Signal(bool)          # shuffle on/off
+    repeatToggled = Signal(bool)           # repeat on/off
+    volumeChangeRequested = Signal(int, int)  # device_id, volume (0-100); device_id=-1 for all
+    globalVolumeChanged = Signal(int)      # master volume (0-100)
+
+    # ============================================================
+    # PLAYBACK STATE UPDATES (MainWindow → Widgets, bidirectional)
+    # ============================================================
+    playbackStateChanged = Signal(str, bool)  # widget_id, is_playing
+    trackChanged = Signal(str, int)        # track_name, track_index
+    playbackProgressChanged = Signal(float)  # progress 0.0-1.0
+    queueUpdated = Signal(list, str)       # queue_preview (list of songs), current_track
+
+    # ============================================================
+    # VOLUME STATE UPDATES (MainWindow → Widgets)
+    # ============================================================
+    volumeUpdated = Signal(int, int)       # device_id, volume
+    globalVolumeUpdated = Signal(int)      # master volume
+    speakerVolumesUpdated = Signal(dict)   # {speaker_id: volume, ...} - all speaker volumes at once
+
+    # ============================================================
+    # SERVER & SIMULATION STATUS
+    # ============================================================
+    serverStatusChanged = Signal(str)      # "running", "stopped", "error", "audio_playing"
+    simulationSpeedChanged = Signal(float)  # speed multiplier
+
+    # ============================================================
+    # FLOORPLAN INTERACTION EVENTS
+    # ============================================================
+    floorplanCornerMarked = Signal(int, float, float)  # corner_idx, x_px, y_px
+    floorplanImageLoaded = Signal(str)     # image_path
+    homographyComputed = Signal(object)    # homography_matrix (np.ndarray)
+
+    # ============================================================
+    # SETTINGS & CONFIGURATION
+    # ============================================================
+    settingsChanged = Signal(str, object)  # setting_key, value
 ```
 
 **Usage Pattern:**
+
+**Data Flow (Server → Widgets):**
 
 1. **MainWindow** creates and starts `DummyServerBringUpProMax` instance
 2. **QTimer** (in MainWindow) polls `server.user_position` attribute periodically (50ms = 20Hz)
 3. When position changes, **MainWindow** emits `AppBus.pointerUpdated(x_m, y_m, ts, "server")`
 4. **Widgets** connect to `pointerUpdated` and update their visualizations
-5. **Widgets** emit zone events to AppBus (for logging/status display)
+
+**Command Flow (Widgets → Server):**
+
+1. **Widgets** emit audio command signals to AppBus (e.g., `audioStartRequested.emit("adaptive", {})`)
+2. **MainWindow** connects AppBus signals to server methods (acts as router)
+3. **MainWindow** calls server methods on main thread (thread-safe)
+4. **Widgets** emit event callbacks to AppBus for cross-widget communication
 
 **Benefits:**
 
 - **Loose Coupling**: Widgets don't know about server implementation
 - **Testability**: Widgets can be tested with mock AppBus
-- **Thread Safety**: Qt signals handle cross-thread communication automatically (server runs in background threads)
+- **Thread Safety**: ALL communication through Qt signals (automatic thread-safe delivery)
+- **Consistency**: Same pattern for both inbound data and outbound commands
 - **Extensibility**: New widgets can be added without modifying existing code
 - **Simplicity**: Self-contained application, no external dependencies
+- **Cross-Widget Communication**: Widgets can communicate via AppBus without direct references
 
 ### 2.2 Data Flow Patterns
 
-#### 2.2.1 Inbound Tracking Data Flow (Direct Attribute Polling)
+#### 2.2.1 Complete Data Flow: Down and Up
 
 ```
+┌─────────────────────────────────────────────────────────────────┐
+│                    DATA FLOW DOWN (Polling)                      │
+└─────────────────────────────────────────────────────────────────┘
+
 DummyServerBringUpProMax (background threads)
     │
     │ - Simulates user movement (figure-8 pattern)
     │ - Processes UWB measurements
     │ - Runs PGO solver
     │ - Updates self.user_position attribute (thread-safe with lock)
-    │ - Provides audio demo methods (adaptive_audio_demo(), zone_dj_demo())
     │
     ↓ (polled via attribute access)
 
@@ -212,19 +370,62 @@ MainWindow._position_poll_timer (QTimer, main thread, 20Hz)
 AppBus.pointerUpdated(x_m, y_m, ts, "server")
     │
     ├─→ PgoPlotWidget (plots point)
+    │   └─→ matplotlib/pyqtgraph subwidgets
+    │
     ├─→ AdaptiveAudioWidget (updates floorplan pointer)
+    │   ├─→ FloorplanView subwidget (render pointer)
+    │   └─→ MiniPlayer subwidget (display state)
+    │
     └─→ ZoneDjWidget (updates floorplan pointer)
+        ├─→ FloorplanView subwidget (render pointer)
+        └─→ MiniPlayer subwidget (display state)
 
-              ┌────────────────────────────────────┐
-              │  Widget → Server Method Calls      │
-              │  (Direct, not via AppBus)          │
-              └────────────────────────────────────┘
-                              ↓
-        AdaptiveAudioWidget.button_clicked()
-                              ↓
-              services["server"].adaptive_audio_demo()
-                              ↓
-        DummyServerBringUpProMax logs audio commands
+┌─────────────────────────────────────────────────────────────────┐
+│              EVENT FLOW UP (Callbacks/Events/Commands)           │
+└─────────────────────────────────────────────────────────────────┘
+
+User Interaction (button click, slider, etc.)
+    ↓
+Subwidget (MiniPlayer, FloorplanView)
+    │ - Emits Qt signal (e.g., playRequested, volumeChanged)
+    ↓
+Widget Layer (AdaptiveAudioWidget, ZoneDjWidget)
+    │ - Receives signal from subwidget
+    │ - Processes event (determine which action needed)
+    │ - Emits to AppBus (for ALL commands and callbacks)
+    ↓
+AppBus (signal routing hub)
+    │ - audioStartRequested, playlistChangeRequested, etc.
+    │ - playbackStateChanged, zoneSelected (for cross-widget communication)
+    ↓
+MainWindow (connected to AppBus signals)
+    │ - Receives AppBus signals on main thread
+    │ - Routes to appropriate handler
+    │ - Calls server methods (thread-safe, on main thread)
+    ↓
+DummyServerBringUpProMax
+    │ - adaptive_audio_demo()
+    │ - zone_dj_demo()
+    │ - set_playlist()
+    └─→ Logs audio commands (simulated control)
+
+Example: Play Button Click (Recommended Pattern)
+    User clicks "Play" in MiniPlayer
+    → MiniPlayer.playRequested.emit()
+    → AdaptiveAudioWidget._on_play() receives signal
+    → self.bus.audioStartRequested.emit("adaptive", {})  # Emit to AppBus
+    → MainWindow._on_audio_start_requested("adaptive", {})  # Receives on main thread
+    → self.server.adaptive_audio_demo()  # Thread-safe call
+    → DummyServer logs audio command
+    → (Optional) self.bus.playbackStateChanged.emit("adaptive_widget", True)
+
+Example: Cross-Widget Communication
+    User marks corner in AdaptiveAudioWidget
+    → FloorplanView.cornerMarked.emit(0, 100.5, 200.3)
+    → AdaptiveAudioWidget._on_corner_marked(...)
+    → self.bus.floorplanCornerMarked.emit(0, 100.5, 200.3)  # Broadcast
+    → ZoneDjWidget._on_corner_marked(...) receives update
+    → ZoneDjWidget updates its floorplan accordingly
 ```
 
 **Implementation in MainWindow:**
@@ -232,7 +433,10 @@ AppBus.pointerUpdated(x_m, y_m, ts, "server")
 ```python
 class MainWindow(QMainWindow):
     def __init__(self):
-        # ... setup ...
+        super().__init__()
+
+        # Create AppBus
+        self.bus = AppBus()
 
         # Start server
         self.server = DummyServerBringUpProMax(
@@ -241,13 +445,20 @@ class MainWindow(QMainWindow):
         )
         self.server.start()
 
-        # Setup polling timer
+        # Connect AppBus audio command signals to server methods
+        self.bus.audioStartRequested.connect(self._on_audio_start_requested)
+        self.bus.audioStopRequested.connect(self._on_audio_stop_requested)
+        self.bus.playlistChangeRequested.connect(self._on_playlist_change_requested)
+        self.bus.volumeChangeRequested.connect(self._on_volume_change_requested)
+
+        # Setup polling timer for position data
         self._last_position = None
         self._poll_timer = QTimer()
         self._poll_timer.timeout.connect(self._poll_server_position)
         self._poll_timer.start(50)  # 20Hz polling
 
     def _poll_server_position(self):
+        """Poll server position and emit to AppBus (data down)."""
         # Thread-safe attribute access
         with self.server._position_lock:
             position = self.server.user_position
@@ -262,6 +473,37 @@ class MainWindow(QMainWindow):
                 ts = time.time()
                 self.bus.pointerUpdated.emit(x_m, y_m, ts, "server")
                 self._last_position = position[:2].copy()
+
+    # Audio command handlers (route AppBus → Server)
+    @pyqtSlot(str, dict)
+    def _on_audio_start_requested(self, mode: str, params: dict):
+        """Handle audio start request from widgets via AppBus."""
+        if mode == "adaptive":
+            self.server.adaptive_audio_demo()
+        elif mode == "zone_dj":
+            self.server.zone_dj_demo()
+        # Update status
+        self.bus.serverStatusChanged.emit("audio_playing")
+
+    @pyqtSlot(str)
+    def _on_audio_stop_requested(self, mode: str):
+        """Handle audio stop request from widgets via AppBus."""
+        if mode == "adaptive":
+            self.server.stop_adaptive_audio_demo()
+        elif mode == "zone_dj":
+            self.server.stop_zone_dj_demo()
+        self.bus.serverStatusChanged.emit("audio_stopped")
+
+    @pyqtSlot(int)
+    def _on_playlist_change_requested(self, playlist_number: int):
+        """Handle playlist change request from widgets via AppBus."""
+        self.server.set_playlist(playlist_number)
+
+    @pyqtSlot(int, int)
+    def _on_volume_change_requested(self, device_id: int, volume: int):
+        """Handle volume change request from widgets via AppBus."""
+        # Could add volume control method to server if needed
+        pass
 ```
 
 #### 2.2.2 Zone Registration Flow (Adaptive Audio)
@@ -404,27 +646,198 @@ class BaseWidget(QWidget):
 - Emits: `AppBus.zoneRegistered("A"|"B", x_m, y_m, ts, "pointer")`
 - **Audio Control:** Direct calls to `server.adaptive_audio_demo()` / `server.stop_adaptive_audio_demo()`
 
-**Integration with Server:**
+**Complete Integration Example (AdaptiveAudioWidget):**
 
 ```python
 class AdaptiveAudioWidget(QWidget):
     def __init__(self, app_bus, services, settings, parent=None):
         super().__init__(parent)
         self.bus = app_bus
-        self.server = services.get("server")  # Access to DummyServerBringUpProMax
+        self.settings = settings
+        # Note: No direct server access needed!
 
-    def _on_start_button_clicked(self):
-        if self.server:
-            self.server.adaptive_audio_demo()  # Direct method call
+        # Create subwidgets
+        self._setup_ui()
 
-    def _on_stop_button_clicked(self):
-        if self.server:
-            self.server.stop_adaptive_audio_demo()
+        # Connect subwidget signals to handlers
+        self._connect_mini_player_signals()
 
-    def _on_playlist_changed(self, playlist_num):
-        if self.server:
-            self.server.set_playlist(playlist_num)
+        # Subscribe to AppBus state updates
+        self._connect_appbus_signals()
+
+    def _setup_ui(self):
+        """Create UI components."""
+        # Create floorplan view
+        from packages.viz_floorplan import FloorplanView
+        self.floorplan = FloorplanView(parent=self)
+
+        # Create mini player
+        from packages.mini_player import MiniPlayer
+        self.mini_player = MiniPlayer(
+            mode="adaptive",
+            show_queue=True,
+            parent=self
+        )
+
+        # Create enable/bypass controls
+        self.enable_checkbox = QCheckBox("Enable Adaptive Audio")
+        self.bypass_checkbox = QCheckBox("Bypass Audio Processing")
+
+        # Layout
+        layout = QHBoxLayout()
+        layout.addWidget(self.floorplan, stretch=3)
+
+        sidebar = QVBoxLayout()
+        sidebar.addWidget(self.enable_checkbox)
+        sidebar.addWidget(self.bypass_checkbox)
+        sidebar.addWidget(self.mini_player)
+        layout.addLayout(sidebar, stretch=1)
+
+        self.setLayout(layout)
+
+    def _connect_mini_player_signals(self):
+        """Connect mini_player signals to handlers."""
+        # Playback controls
+        self.mini_player.playRequested.connect(self._on_play)
+        self.mini_player.pauseRequested.connect(self._on_pause)
+        self.mini_player.stopRequested.connect(self._on_stop)
+        self.mini_player.skipRequested.connect(self._on_skip)
+        self.mini_player.previousRequested.connect(self._on_previous)
+        self.mini_player.seekRequested.connect(self._on_seek)
+
+        # Volume control
+        self.mini_player.volumeChanged.connect(self._on_volume_changed)
+
+        # Playlist control
+        self.mini_player.playlistSelected.connect(self._on_playlist_selected)
+
+        # Enable/bypass controls
+        self.enable_checkbox.toggled.connect(self._on_enable_toggled)
+        self.bypass_checkbox.toggled.connect(self._on_bypass_toggled)
+
+    def _connect_appbus_signals(self):
+        """Subscribe to AppBus state updates."""
+        # Position updates
+        self.bus.pointerUpdated.connect(self._on_pointer_updated)
+
+        # Playback state updates
+        self.bus.queueUpdated.connect(self._on_queue_updated)
+        self.bus.trackChanged.connect(self._on_track_changed)
+        self.bus.playbackProgressChanged.connect(self._on_progress_changed)
+        self.bus.playbackStateChanged.connect(self._on_playback_state_changed)
+
+        # Volume updates
+        self.bus.volumeUpdated.connect(self._on_volume_updated)
+
+        # Zone events
+        self.bus.zoneRegistered.connect(self._on_zone_registered)
+        self.bus.zoneDeregistered.connect(self._on_zone_deregistered)
+
+    # ================================================================
+    # CONTROL HANDLERS (Emit to AppBus)
+    # ================================================================
+    def _on_play(self):
+        """Handle play button click."""
+        self.bus.playRequested.emit("adaptive_widget")
+        # Start adaptive audio demo
+        self.bus.audioStartRequested.emit("adaptive", {})
+
+    def _on_pause(self):
+        """Handle pause button click."""
+        self.bus.pauseRequested.emit("adaptive_widget")
+
+    def _on_stop(self):
+        """Handle stop button click."""
+        self.bus.stopRequested.emit("adaptive_widget")
+        # Stop adaptive audio demo
+        self.bus.audioStopRequested.emit("adaptive")
+
+    def _on_skip(self):
+        """Handle skip button click."""
+        self.bus.skipRequested.emit("adaptive_widget")
+
+    def _on_previous(self):
+        """Handle previous button click."""
+        self.bus.previousRequested.emit("adaptive_widget")
+
+    def _on_seek(self, position: float):
+        """Handle seek slider."""
+        self.bus.seekRequested.emit("adaptive_widget", position)
+
+    def _on_volume_changed(self, volume: int):
+        """Handle volume slider change."""
+        # Set volume for all speakers in adaptive mode
+        self.bus.volumeChangeRequested.emit(-1, volume)
+
+    def _on_playlist_selected(self, playlist_id: int):
+        """Handle playlist selection."""
+        self.bus.playlistChangeRequested.emit(playlist_id)
+
+    def _on_enable_toggled(self, checked: bool):
+        """Handle enable adaptive audio checkbox."""
+        self.bus.adaptiveAudioEnabled.emit(checked)
+
+    def _on_bypass_toggled(self, checked: bool):
+        """Handle bypass audio processing checkbox."""
+        self.bus.bypassAudioRequested.emit(checked)
+
+    # ================================================================
+    # STATE UPDATE HANDLERS (Receive from AppBus)
+    # ================================================================
+    def _on_pointer_updated(self, x_m: float, y_m: float, ts: float, source: str):
+        """Update floorplan pointer."""
+        self.floorplan.map_pointer(x_m, y_m)
+
+        # Determine zone (Adaptive: split at y=3.0m)
+        if y_m < 3.0:
+            zone_id = "A"
+        else:
+            zone_id = "B"
+        # Zone registration logic here...
+
+    def _on_queue_updated(self, queue_preview: list, current_track: str):
+        """Update mini_player queue display."""
+        self.mini_player.update_queue_list(queue_preview)
+        self.mini_player.update_current_track(current_track)
+
+    def _on_track_changed(self, track_name: str, track_index: int):
+        """Update current track display."""
+        self.mini_player.set_track_name(track_name)
+
+    def _on_progress_changed(self, progress: float):
+        """Update playback progress bar."""
+        self.mini_player.set_progress(progress)
+
+    def _on_playback_state_changed(self, widget_id: str, is_playing: bool):
+        """Update play/pause button state."""
+        if widget_id == "adaptive_widget" or widget_id == "main":
+            self.mini_player.set_playing_state(is_playing)
+
+    def _on_volume_updated(self, device_id: int, volume: int):
+        """Update volume slider."""
+        # Update if it's our device or all devices
+        if device_id == -1 or device_id in self.active_speakers:
+            self.mini_player.set_volume_slider(volume)
+
+    def _on_zone_registered(self, zone_id, x_m, y_m, ts, source):
+        """Handle zone registration event."""
+        # Update visual feedback
+        pass
+
+    def _on_zone_deregistered(self, zone_id, x_m, y_m, ts, source):
+        """Handle zone deregistration event."""
+        # Update visual feedback
+        pass
 ```
+
+**Why This Architecture is Better:**
+
+- ✅ Thread-safe (Qt signals ensure main thread delivery)
+- ✅ Widgets don't need server reference
+- ✅ Testable (mock AppBus)
+- ✅ Consistent pattern (all communication via AppBus)
+- ✅ Complete control surface (all playback features)
+- ✅ Bidirectional updates (commands out, state in)
 
 **Configuration:**
 
@@ -473,25 +886,37 @@ class AdaptiveAudioWidget(QWidget):
 - Emits: `AppBus.zoneRegistered(zone_id, x_m, y_m, ts, "pointer")`
 - **Audio Control:** Direct calls to `server.zone_dj_demo()` / `server.stop_zone_dj_demo()`
 
-**Integration with Server:**
+**Integration via AppBus (Recommended):**
 
 ```python
 class ZoneDjWidget(QWidget):
     def __init__(self, app_bus, services, settings, parent=None):
         super().__init__(parent)
         self.bus = app_bus
-        self.server = services.get("server")  # Access to DummyServerBringUpProMax
+        # Note: No direct server access needed!
+
+        # Connect to internal zone events
+        self.bus.zoneRegistered.connect(self._on_zone_registered)
+        self.bus.zoneDeregistered.connect(self._on_zone_deregistered)
 
     def _on_zone_registered(self, zone_id, x_m, y_m, ts, source):
-        # When user enters a zone
-        if self.server:
-            self.server.zone_dj_demo()  # Start zone DJ simulation
+        """When user enters a zone, emit audio command to AppBus."""
+        params = {"zone_id": zone_id, "position": (x_m, y_m)}
+        self.bus.audioStartRequested.emit("zone_dj", params)
+        # Emit callback for cross-widget communication
+        self.bus.zoneSelected.emit(zone_id)
 
     def _on_zone_deregistered(self, zone_id, x_m, y_m, ts, source):
-        # When user leaves a zone
-        if self.server:
-            self.server.stop_zone_dj_demo()
+        """When user leaves a zone, emit stop command to AppBus."""
+        self.bus.audioStopRequested.emit("zone_dj")
 ```
+
+**Why This is Better:**
+
+- ✅ Thread-safe (Qt signals ensure main thread delivery)
+- ✅ Widgets don't need server reference
+- ✅ Other widgets can listen to `zoneSelected` signal
+- ✅ Consistent pattern (all communication via AppBus)
 
 **Configuration:**
 
@@ -568,9 +993,14 @@ poll_rate_hz = 20
 - Homography computation (world↔image transformation)
 - Grid projection (8×10 cells, perspective-correct)
 - Circular zone placement and management
+- Rectangular zone support (for Adaptive Audio)
 - Pointer visualization (red dot, world coordinates)
 - Zone registration/deregistration timers
 - Fade animations for zone state changes
+- Speaker volume visualization (Adaptive Audio only)
+  - Speaker icons at corner positions (anchor locations)
+  - Real-time volume bars with percentage display
+  - Automatic positioning and cleanup
 
 **API:**
 
@@ -581,10 +1011,15 @@ class FloorplanView(QGraphicsView):
     def auto_detect_corners(self) -> bool
     def map_pointer(self, x_m: float, y_m: float)
     def place_zone(self, x_m: float, y_m: float, radius_m: float) -> Zone
+    def place_rectangular_zone(self, x1_m: float, y1_m: float, x2_m: float, y2_m: float, zone_id=None) -> RectangularZone
     def clear_zones(self)
+    def set_speaker_volumes(self, volumes: dict)  # {speaker_id: volume}
+    def set_speaker_positions(self, positions: dict)  # {speaker_id: [x_m, y_m, z_m]}
+    def set_show_speakers(self, show: bool)  # Enable/disable speaker visualization
     pointerMapped = Signal(float, float)  # x_m, y_m when user clicks
     zoneRegistered = Signal(Zone)
     zoneDeregistered = Signal(Zone)
+    homographyComputed = Signal()  # Emitted when homography is computed
 ```
 
 **World Coordinate System:**
@@ -594,9 +1029,11 @@ class FloorplanView(QGraphicsView):
 - Y-axis: Increases downward (0.0 → 6.00 m)
 - Units: Meters (all internal calculations use meters)
 
-### 5.2 MiniPlayer (`adaptive_audio_widget` / `zone_dj_widget`)
+### 5.2 MiniPlayer (Shared Subwidget)
 
-**Purpose:** Compact audio player control widget for sidebar display.
+**Package:** `packages/mini_player/mini_player.py` (single shared implementation)
+
+**Purpose:** Compact audio player control widget for sidebar display. This is a reusable subwidget instantiated by parent widgets with specific parameters.
 
 **Features:**
 
@@ -607,20 +1044,97 @@ class FloorplanView(QGraphicsView):
 - Queue display (scrollable list)
 - Progress indicator (optional)
 
-**Signals:**
+**Complete MiniPlayer API:**
 
 ```python
-playRequested = Signal()
-pauseRequested = Signal()
-skipRequested = Signal()
-volumeChanged = Signal(int)  # 0-100
+class MiniPlayer(QWidget):
+    # ============================================================
+    # SIGNALS (Emitted to parent widget)
+    # ============================================================
+    # Playback control signals
+    playRequested = Signal()
+    pauseRequested = Signal()
+    stopRequested = Signal()
+    skipRequested = Signal()           # Next track
+    previousRequested = Signal()       # Previous track
+    seekRequested = Signal(float)      # Seek to position (0.0-1.0)
+
+    # Volume control signals
+    volumeChanged = Signal(int)        # Volume 0-100
+
+    # Playlist control signals
+    playlistSelected = Signal(int)     # Playlist ID
+    shuffleToggled = Signal(bool)      # Shuffle on/off
+    repeatToggled = Signal(bool)       # Repeat on/off
+
+    # ============================================================
+    # PUBLIC METHODS (Called by parent widget)
+    # ============================================================
+    def update_queue_list(self, queue_preview: list) -> None:
+        """Update the displayed queue with list of track names."""
+
+    def update_current_track(self, track_name: str) -> None:
+        """Update the currently playing track display."""
+
+    def set_track_name(self, track_name: str) -> None:
+        """Set the track name label."""
+
+    def set_progress(self, progress: float) -> None:
+        """Set playback progress bar (0.0-1.0)."""
+
+    def set_volume_slider(self, volume: int) -> None:
+        """Set volume slider position (0-100)."""
+
+    def set_playing_state(self, is_playing: bool) -> None:
+        """Update play/pause button state."""
+
+    def set_playlist_dropdown(self, playlist_id: int) -> None:
+        """Set selected playlist in dropdown."""
+
+    def clear_queue(self) -> None:
+        """Clear the queue display."""
 ```
 
-**Usage:**
+**Usage Pattern:**
 
-- Embedded in Adaptive Audio and Zone DJ widgets
-- Connected to AppBus for audio command emission
-- Can be replaced with custom player implementation
+```python
+# In AdaptiveAudioWidget
+class AdaptiveAudioWidget(QWidget):
+    def __init__(self, app_bus, services, settings, parent=None):
+        super().__init__(parent)
+        # Import shared mini_player
+        from packages.mini_player import MiniPlayer
+
+        # Instantiate with specific configuration for adaptive audio
+        self.mini_player = MiniPlayer(
+            mode="adaptive",
+            show_queue=False,
+            parent=self
+        )
+        self.mini_player.playRequested.connect(self._on_play)
+        self.mini_player.volumeChanged.connect(self._on_volume_changed)
+
+# In ZoneDjWidget
+class ZoneDjWidget(QWidget):
+    def __init__(self, app_bus, services, settings, parent=None):
+        super().__init__(parent)
+        # Import same shared mini_player
+        from packages.mini_player import MiniPlayer
+
+        # Instantiate with different configuration for zone DJ
+        self.mini_player = MiniPlayer(
+            mode="zone_dj",
+            show_queue=True,
+            parent=self
+        )
+        self.mini_player.playRequested.connect(self._on_zone_play)
+```
+
+**Key Points:**
+
+- **Single Implementation**: Only ONE `mini_player.py` file in the codebase
+- **Parameterized**: Different widgets pass different parameters to customize behavior
+- **No Duplication**: Avoid creating `adaptive_audio_widget/mini_player.py` and `zone_dj_widget/mini_player.py`
 
 ---
 
@@ -659,24 +1173,60 @@ class MainWindow(QMainWindow):
         )
         self.server.start()
 
+        # Connect AppBus signals to server methods (routing layer)
+        self._connect_appbus_signals()
+
         # Build services dictionary (passed to widgets)
+        # Note: widgets don't need server reference anymore (use AppBus instead)
         self.services = {
-            "server": self.server,  # Widgets can access server for audio methods
             "settings": self.settings
         }
 
-        # Setup position polling
+        # Setup polling timers
         self._last_position = None
-        self._poll_timer = QTimer()
-        self._poll_timer.timeout.connect(self._poll_server_position)
-        poll_interval_ms = 1000 // self.settings.value("server/poll_rate_hz", 20, type=int)
-        self._poll_timer.start(poll_interval_ms)  # Default: 50ms = 20Hz
+        self._last_volumes = {}
 
-        # Build widgets (they receive server via services dict)
+        # Position polling (20Hz)
+        self._position_timer = QTimer()
+        self._position_timer.timeout.connect(self._poll_server_position)
+        poll_interval_ms = 1000 // self.settings.value("server/poll_rate_hz", 20, type=int)
+        self._position_timer.start(poll_interval_ms)  # Default: 50ms = 20Hz
+
+        # Queue/playback state polling (1Hz - less frequent)
+        self._queue_timer = QTimer()
+        self._queue_timer.timeout.connect(self._poll_playback_state)
+        self._queue_timer.start(1000)  # 1Hz
+
+    def _connect_appbus_signals(self):
+        """Connect all AppBus signals to their handlers."""
+        # Playback control
+        self.bus.playRequested.connect(self._on_play_requested)
+        self.bus.pauseRequested.connect(self._on_pause_requested)
+        self.bus.stopRequested.connect(self._on_stop_requested)
+        self.bus.skipRequested.connect(self._on_skip_requested)
+        self.bus.previousRequested.connect(self._on_previous_requested)
+        self.bus.seekRequested.connect(self._on_seek_requested)
+
+        # Audio mode control
+        self.bus.audioStartRequested.connect(self._on_audio_start_requested)
+        self.bus.audioStopRequested.connect(self._on_audio_stop_requested)
+        self.bus.adaptiveAudioEnabled.connect(self._on_adaptive_audio_enabled)
+        self.bus.zoneDjEnabled.connect(self._on_zone_dj_enabled)
+        self.bus.bypassAudioRequested.connect(self._on_bypass_audio_requested)
+
+        # Playlist & volume control
+        self.bus.playlistChangeRequested.connect(self._on_playlist_change_requested)
+        self.bus.volumeChangeRequested.connect(self._on_volume_change_requested)
+        self.bus.globalVolumeChanged.connect(self._on_global_volume_changed)
+
+        # Settings
+        self.bus.simulationSpeedChanged.connect(self._on_simulation_speed_changed)
+
+        # Build widgets (they communicate via AppBus)
         self._build_tabs()
 
     def _build_tabs(self):
-        # Widgets receive server instance via services
+        # Widgets receive AppBus, not server directly
         self.tab_pgo = PgoPlotWidget(self.bus, self.services, self.settings)
         self.tab_adaptive = AdaptiveAudioWidget(self.bus, self.services, self.settings)
         self.tab_zonedj = ZoneDjWidget(self.bus, self.services, self.settings)
@@ -684,6 +1234,142 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_pgo, "PGO Data")
         self.tabs.addTab(self.tab_adaptive, "Adaptive Audio")
         self.tabs.addTab(self.tab_zonedj, "Zone DJ")
+
+    # ================================================================
+    # APPBUS SIGNAL HANDLERS (Route to server methods)
+    # ================================================================
+
+    # --- Playback Control Handlers ---
+    @pyqtSlot(str)
+    def _on_play_requested(self, source: str):
+        """Handle play request from widgets."""
+        self.server.play()
+        self.bus.playbackStateChanged.emit(source, True)
+        self.bus.serverStatusChanged.emit("playing")
+
+    @pyqtSlot(str)
+    def _on_pause_requested(self, source: str):
+        """Handle pause request from widgets."""
+        self.server.pause()
+        self.bus.playbackStateChanged.emit(source, False)
+        self.bus.serverStatusChanged.emit("paused")
+
+    @pyqtSlot(str)
+    def _on_stop_requested(self, source: str):
+        """Handle stop request from widgets."""
+        self.server.stop_playback()
+        self.bus.playbackStateChanged.emit(source, False)
+        self.bus.serverStatusChanged.emit("stopped")
+
+    @pyqtSlot(str)
+    def _on_skip_requested(self, source: str):
+        """Handle skip to next track request."""
+        self.server.skip_track()
+        # Emit track change
+        current_track = self.server.get_current_track()
+        self.bus.trackChanged.emit(current_track, self.server.current_track_index)
+
+    @pyqtSlot(str)
+    def _on_previous_requested(self, source: str):
+        """Handle previous track request."""
+        self.server.previous_track()
+        current_track = self.server.get_current_track()
+        self.bus.trackChanged.emit(current_track, self.server.current_track_index)
+
+    @pyqtSlot(str, float)
+    def _on_seek_requested(self, source: str, position: float):
+        """Handle seek request."""
+        self.server.seek(position)
+
+    # --- Audio Mode Handlers ---
+    @pyqtSlot(str, dict)
+    def _on_audio_start_requested(self, mode: str, params: dict):
+        """Handle audio mode start request (adaptive/zone_dj)."""
+        if mode == "adaptive":
+            self.server.adaptive_audio_demo()
+        elif mode == "zone_dj":
+            self.server.zone_dj_demo(**params)
+        self.bus.serverStatusChanged.emit("audio_playing")
+
+    @pyqtSlot(str)
+    def _on_audio_stop_requested(self, mode: str):
+        """Handle audio mode stop request."""
+        if mode == "adaptive":
+            self.server.stop_adaptive_audio_demo()
+        elif mode == "zone_dj":
+            self.server.stop_zone_dj_demo()
+        self.bus.serverStatusChanged.emit("audio_stopped")
+
+    @pyqtSlot(bool)
+    def _on_adaptive_audio_enabled(self, enabled: bool):
+        """Enable/disable adaptive audio mode."""
+        self.server.enable_adaptive_audio(enabled)
+
+    @pyqtSlot(bool)
+    def _on_zone_dj_enabled(self, enabled: bool):
+        """Enable/disable zone DJ mode."""
+        self.server.enable_zone_dj(enabled)
+
+    @pyqtSlot(bool)
+    def _on_bypass_audio_requested(self, bypass: bool):
+        """Bypass all audio processing."""
+        self.server.bypass_audio_processing(bypass)
+
+    # --- Playlist & Volume Handlers ---
+    @pyqtSlot(int)
+    def _on_playlist_change_requested(self, playlist_number: int):
+        """Handle playlist change request."""
+        self.server.set_playlist(playlist_number)
+        # Emit queue update
+        self._poll_playback_state()
+
+    @pyqtSlot(int, int)
+    def _on_volume_change_requested(self, device_id: int, volume: int):
+        """Handle volume change for specific device or all devices."""
+        if device_id == -1:
+            # Set volume for all devices
+            self.server.set_global_volume(volume)
+            self.bus.globalVolumeUpdated.emit(volume)
+        else:
+            self.server.set_volume(device_id, volume)
+            self.bus.volumeUpdated.emit(device_id, volume)
+
+    @pyqtSlot(int)
+    def _on_global_volume_changed(self, volume: int):
+        """Handle global volume change."""
+        self.server.set_global_volume(volume)
+        self.bus.globalVolumeUpdated.emit(volume)
+
+    # --- Settings Handlers ---
+    @pyqtSlot(float)
+    def _on_simulation_speed_changed(self, speed: float):
+        """Handle simulation speed change."""
+        self.server.simulation_speed = speed
+        self.bus.simulationSpeedChanged.emit(speed)
+
+    # ================================================================
+    # POLLING METHODS (Server state → AppBus)
+    # ================================================================
+
+    def _poll_playback_state(self):
+        """Poll queue and playback state, emit to AppBus (1Hz)."""
+        # Queue preview
+        queue_preview = self.server.get_queue_preview(5)
+        current_track = self.server.get_current_track()
+        self.bus.queueUpdated.emit(queue_preview, current_track)
+
+        # Playback progress (only if playing)
+        if self.server.is_playing():
+            progress = self.server.get_playback_progress()
+            self.bus.playbackProgressChanged.emit(progress)
+
+        # Volume states (emit only if changed)
+        speaker_states = self.server.get_speaker_states()
+        for device_id, state in speaker_states.items():
+            volume = state.get('volume', 0)
+            if device_id not in self._last_volumes or volume != self._last_volumes[device_id]:
+                self.bus.volumeUpdated.emit(device_id, volume)
+                self._last_volumes[device_id] = volume
 ```
 
 **Accessible Attributes:**
@@ -692,40 +1378,164 @@ class MainWindow(QMainWindow):
 - `server.data` - Dict[int, BinnedData] - latest binned measurement data
 - `server.nodes` - Dict[int, np.ndarray] - anchor positions in cm
 - `server.simulation_speed` - float - simulation speed multiplier
+- `server.volumes` - Dict[int, int] - speaker volumes {speaker_id: volume} (thread-safe with `_volumes_lock`)
 
-**Audio Demo Methods (from PR #15):**
+**Speaker Volume Methods:**
 
-- `server.adaptive_audio_demo()` - Start adaptive audio demo (simulates position-based audio)
-- `server.stop_adaptive_audio_demo()` - Stop adaptive audio demo
-- `server.zone_dj_demo()` - Start zone DJ demo (simulates multi-zone audio)
-- `server.stop_zone_dj_demo()` - Stop zone DJ demo
-- `server.set_playlist(playlist_number: int)` - Set playlist (1-5)
+- `server.get_speaker_volumes() -> Dict[int, int]` - Get current speaker volumes (thread-safe)
+- `server.get_speaker_positions() -> Dict[int, np.ndarray]` - Get speaker positions in meters (from anchor positions)
 
-**Note:** Audio methods log commands instead of actual playback. This provides a simulation/demonstration of audio control functionality.
+**Complete DummyServer API Reference:**
 
-**Thread Safety Warning:**
-These audio methods modify internal state variables (`self.volumes`, `self.current_pair`, etc.) that are **not protected by locks**. They should only be called from the main Qt thread (where widgets run). Since Qt widget event handlers (button clicks, etc.) run on the main thread by default, direct calls from widgets are safe. However, for production use or if calling from background threads, consider:
+```python
+class DummyServerBringUpProMax:
+    # ============================================================
+    # LIFECYCLE METHODS
+    # ============================================================
+    def start(self) -> None
+        """Start the dummy server simulation and processing threads."""
 
-1. Using Qt signals to invoke methods safely:
+    def stop(self) -> None
+        """Stop all processing, simulation, and audio demo threads."""
+
+    # ============================================================
+    # AUDIO DEMO MODES (High-level control)
+    # ============================================================
+    def adaptive_audio_demo(self) -> None
+        """Start adaptive audio demo (position-based 2-zone audio)."""
+
+    def stop_adaptive_audio_demo(self) -> None
+        """Stop adaptive audio demo."""
+
+    def zone_dj_demo(self, **params) -> None
+        """Start zone DJ demo (multi-zone audio with parameters)."""
+
+    def stop_zone_dj_demo(self) -> None
+        """Stop zone DJ demo."""
+
+    def enable_adaptive_audio(self, enabled: bool) -> None
+        """Enable or disable adaptive audio processing."""
+
+    def enable_zone_dj(self, enabled: bool) -> None
+        """Enable or disable zone DJ mode."""
+
+    def bypass_audio_processing(self, bypass: bool) -> None
+        """Bypass all audio DSP processing (passthrough mode)."""
+
+    # ============================================================
+    # PLAYBACK CONTROL METHODS
+    # ============================================================
+    def play(self) -> None
+        """Resume playback (or start if stopped)."""
+
+    def pause(self) -> None
+        """Pause current playback."""
+
+    def stop_playback(self) -> None
+        """Stop playback completely."""
+
+    def skip_track(self) -> None
+        """Skip to next track in queue."""
+
+    def previous_track(self) -> None
+        """Go back to previous track."""
+
+    def seek(self, position: float) -> None
+        """Seek to position in current track (0.0-1.0)."""
+
+    def is_playing(self) -> bool
+        """Return True if currently playing."""
+
+    # ============================================================
+    # PLAYLIST & QUEUE METHODS
+    # ============================================================
+    def set_playlist(self, playlist_number: int) -> None
+        """Set current playlist (1-5)."""
+
+    def get_playlist(self, playlist_id: int) -> list
+        """Get playlist by ID (returns list of track names)."""
+
+    def get_current_track(self) -> str
+        """Get currently playing track name."""
+
+    def get_queue_preview(self, count: int = 5) -> list
+        """Get next N tracks in queue."""
+
+    def get_playback_progress(self) -> float
+        """Get current track progress (0.0-1.0)."""
+
+    # ============================================================
+    # VOLUME CONTROL METHODS
+    # ============================================================
+    def set_volume(self, device_id: int, volume: int) -> None
+        """Set volume for specific device (0-100)."""
+
+    def set_global_volume(self, volume: int) -> None
+        """Set master volume for all devices (0-100)."""
+
+    def get_volume(self, device_id: int) -> int
+        """Get current volume for device."""
+
+    def get_speaker_states(self) -> dict
+        """Get all speaker states (volumes, active status)."""
+
+    # ============================================================
+    # STATE QUERY METHODS
+    # ============================================================
+    def get_audio_state(self) -> dict
+        """Get complete audio state (mode, playback, volumes)."""
+
+    def get_zone_state(self) -> dict
+        """Get current zone activation state."""
+
+    # ============================================================
+    # ATTRIBUTES (Read-only, use with locks where indicated)
+    # ============================================================
+    # user_position: np.ndarray  # [x, y, z] in cm (use _position_lock)
+    # data: Dict[int, BinnedData]  # latest binned measurement data
+    # nodes: Dict[int, np.ndarray]  # anchor positions in cm
+    # simulation_speed: float  # simulation speed multiplier
+    # current_playlist: list  # current playlist tracks
+    # current_track_index: int  # index in current_playlist
+    # volumes: Dict[int, int]  # speaker volumes {device_id: volume}
+```
+
+**Implementation Notes:**
+
+- All audio methods log commands to console (simulated audio control)
+- DSP coordination happens within DummyServer (widgets only trigger state changes)
+- Thread safety: Call audio methods only from main thread (via MainWindow routing)
+- Position data: Always access `user_position` with `_position_lock`
+
+**Thread Safety Solution (AppBus Pattern):**
+
+The recommended approach is to route all audio commands through AppBus:
+
+1. **Widgets emit to AppBus** (from any thread, Qt handles queueing):
    
    ```python
-   # Option 1: Add signals to DummyServer (inherit from QObject)
-   self.server.audioCommandRequested.emit("adaptive_start", {})
+   # In widget (any thread)
+   self.bus.audioStartRequested.emit("adaptive", {})
    ```
 
-# Option 2: Use QMetaObject.invokeMethod
+2. **MainWindow receives on main thread** and calls server:
+   
+   ```python
+   # In MainWindow (always main thread)
+   @pyqtSlot(str, dict)
+   def _on_audio_start_requested(self, mode: str, params: dict):
+       self.server.adaptive_audio_demo()  # Safe: main thread only
+   ```
 
-QMetaObject.invokeMethod(self.server, "adaptive_audio_demo", Qt.QueuedConnection)
+3. **Benefits:**
+   
+   - ✅ Qt signal system ensures main thread delivery
+   - ✅ No locks needed in DummyServer audio methods
+   - ✅ Thread-safe even if widgets call from timers/backgrounds threads
+   - ✅ Consistent with position data flow pattern
+   - ✅ Testable (mock AppBus)
 
-```
-2. Adding explicit locks to audio methods:
-```python
-def adaptive_audio_demo(self):
-    with self._audio_lock:  # Add this lock
-        # ... audio control logic ...
-```
-
-For the current demonstration purposes where widgets call these methods from button click handlers (main thread), the implementation is adequate.
+**Alternative (Deprecated):** Direct widget→server calls work only if called from main thread (button handlers). Not recommended for production.
 
 **Thread Safety:**
 
@@ -876,32 +1686,41 @@ class PgoPlotWidget(QWidget):
 - Never access Qt widgets directly from background threads
 - Use `QMetaObject.invokeMethod()` if needed for complex operations
 
-**Known Limitation - Audio Method Calls:**
+**Thread Safety: Solved via AppBus Pattern ✅**
 
-- Audio methods (`adaptive_audio_demo()`, etc.) in `DummyServerBringUpProMax` are not thread-safe
-- They modify internal state without locks (`self.volumes`, `self.current_pair`)
-- **Safe**: Calling from widget event handlers (main thread) ✅
-- **Unsafe**: Calling from timers or background threads without proper synchronization ❌
+The architecture routes all audio commands through AppBus, solving thread safety issues:
 
-**Recommendation for production:**
+**Pattern:**
+
+1. **Widgets** → emit to AppBus (any thread)
+2. **AppBus** → Qt signal system (automatic queuing)
+3. **MainWindow** → receives on main thread
+4. **MainWindow** → calls DummyServer methods (thread-safe)
+
+**Code Example:**
 
 ```python
-# Add QObject inheritance and signals to DummyServer
-class DummyServerBringUpProMax(QObject):
-    audioCommandRequested = pyqtSignal(str, dict)
+# Widget (any thread)
+class AdaptiveAudioWidget(QWidget):
+    def _on_button_clicked(self):
+        self.bus.audioStartRequested.emit("adaptive", {})  # Thread-safe
 
-    def __init__(self, ...):
-        super().__init__()
-        self.audioCommandRequested.connect(self._handle_audio_command)
+# MainWindow (main thread only)
+class MainWindow(QMainWindow):
+    def __init__(self):
+        self.bus.audioStartRequested.connect(self._on_audio_start_requested)
 
     @pyqtSlot(str, dict)
-    def _handle_audio_command(self, command, params):
-        # Thread-safe handler
-        pass
-
-# From widget (any thread)
-self.server.audioCommandRequested.emit("adaptive_start", {})
+    def _on_audio_start_requested(self, mode: str, params: dict):
+        self.server.adaptive_audio_demo()  # Always called from main thread
 ```
+
+**Benefits:**
+
+- ✅ No locks needed in DummyServer
+- ✅ Works from any thread (timers, backgrounds, button handlers)
+- ✅ Qt guarantees main thread delivery
+- ✅ Consistent architecture (all communication via AppBus)
 
 ---
 
@@ -1046,85 +1865,261 @@ python -m UnifiedDemo.main_demo
 
 ## 12. Glossary
 
-- **AppBus:** Qt signal hub for intra-application event routing
+- **AppBus:** Qt signal hub for ALL intra-application communication (position, commands, events)
+- **Audio Command Signals:** AppBus signals for audio control (audioStartRequested, audioStopRequested, playlistChangeRequested)
+- **Event Callback Signals:** AppBus signals for cross-widget communication (playbackStateChanged, zoneSelected, floorplanCornerMarked)
 - **DummyServerBringUpProMax:** Simulation server providing UWB position data and audio demo methods
+- **MainWindow Router:** MainWindow connects AppBus signals to server method calls (thread-safe routing layer)
 - **Homography:** 3×3 transformation matrix mapping world coordinates to image pixels
 - **PGO:** Pose Graph Optimization, algorithm for estimating user position from UWB measurements
 - **Zone:** A defined region in world space (circular or rectangular) that triggers events when user enters/exits
 - **Registration:** Event triggered when user enters a zone (after hover threshold)
 - **Deregistration:** Event triggered when user exits a zone (after leave threshold)
 - **FloorplanView:** Reusable widget for displaying floorplan images with world coordinate mapping
-- **MiniPlayer:** Compact audio player control widget
-- **Services Dictionary:** Dict passed to widgets containing server instance and settings
+- **MiniPlayer:** Compact audio player control widget (shared subwidget, single implementation)
+- **Services Dictionary:** Dict passed to widgets (settings only; no server reference needed)
 - **Polling:** MainWindow QTimer-based reading of server.user_position attribute (20Hz)
+- **Subwidget:** Reusable UI component at the lowest hierarchy (viz_floorplan, mini_player)
+- **Widget Layer:** Mid-level components that instantiate subwidgets (adaptive_audio_widget, zone_dj_widget)
+- **Data Down, Events Up:** Data flows from main_demo → widgets → subwidgets; events/callbacks flow upward via AppBus
+- **Parameterization:** Widgets configure subwidgets with specific parameters instead of duplicating code
+- **Thread-Safe Communication:** All AppBus signals delivered to main thread by Qt, ensuring safe server method calls
 
 ---
 
 ## 13. References
 
-- [Unified Demo Proposal](../unified_demo_proposal.md)
-- [Architecture Documentation](../UnifiedDemo/docs/Architecture.md)
-- [AppBus Documentation](../UnifiedDemo/appbus.md)
-- [Services Documentation](../UnifiedDemo/services/README.md)
+- [PR #15 - DummyServer Implementation](https://github.com/Hong-yiii/uwb-localization-mesh/pull/15) - feat/dummyserver branch with audio demo functionality
+- [DummyServerBringUp.py](../DummyServerBringUp.py) - Simulation server implementation
 - [PyQt5 Documentation](https://www.riverbankcomputing.com/static/Docs/PyQt5/)
-
----
+- [Unified Demo Proposal](../unified_demo_proposal.md)
 
 ---
 
 ## 14. Integration Summary
 
-### Data Flow: Two Patterns
+### Data Flow: Unified Pattern via AppBus
 
-**Pattern 1: Position Updates (Polling)**
-
-```
-DummyServer → MainWindow polls → AppBus → Widgets subscribe
-(background)   (QTimer 20Hz)    (signals)  (visualization)
-```
-
-**Pattern 2: Audio Control (Direct Method Calls)**
+**Pattern 1: Position Updates (Server → Widgets)**
 
 ```
-Widget UI → services["server"].method() → DummyServer logs
-(buttons)   (direct call)                (simulation)
+DummyServer → MainWindow polls → AppBus.pointerUpdated → Widgets subscribe
+(background)   (QTimer 20Hz)    (signal)               (visualization)
+```
+
+**Pattern 2: Audio Commands (Widgets → Server)**
+
+```
+Widget UI → AppBus.audioStartRequested → MainWindow routes → DummyServer.method()
+(buttons)   (emit signal)               (@pyqtSlot handler)  (logs simulation)
+```
+
+**Pattern 3: Event Callbacks (Widget ↔ Widget)**
+
+```
+WidgetA → AppBus.playbackStateChanged → WidgetB subscribes
+          AppBus.zoneSelected
+          AppBus.floorplanCornerMarked
 ```
 
 ### Key Architectural Decisions
 
-1. **Direct Integration**: Attribute polling and direct method calls (no message broker)
-2. **Server in Services Dict**: Widgets access server via `services["server"]`
-3. **Dual Communication**: 
-   - Position: AppBus signals (decoupled, one-way broadcast)
-   - Audio: Direct method calls (simple, synchronous)
-4. **Thread Safety**: All server attribute access uses `_position_lock`
-5. **Audio Simulation**: Methods log commands for demonstration
+1. **Unified Communication**: ALL communication flows through AppBus (position, commands, events)
+2. **Thread Safety**: Qt signal system ensures thread-safe delivery to main thread
+3. **Decoupling**: Widgets don't hold server references (except MainWindow)
+4. **MainWindow as Router**: Connects AppBus signals to server method calls
+5. **No Direct Calls**: Widgets emit signals, never call server methods directly
+6. **Cross-Widget Communication**: Widgets can communicate via AppBus without direct references
+7. **Testability**: Mock AppBus for unit testing widgets
 
-### Widget-Server Integration
+### Widget-AppBus Integration
 
-All widgets receive server instance:
+All widgets receive AppBus instance:
 
 ```python
 def __init__(self, app_bus, services, settings, parent=None):
-    self.server = services.get("server")  # DummyServerBringUpProMax
+    self.bus = app_bus  # AppBus for ALL communication
+    # No server reference needed!
 ```
 
 Widgets can:
 
-- Subscribe to `AppBus.pointerUpdated` for position data
-- Call `self.server.adaptive_audio_demo()` for audio control
-- Call `self.server.set_playlist(n)` for playlist changes
-- Access `self.server.user_position` (if needed, with lock)
+- **Subscribe** to `AppBus.pointerUpdated` for position data
+- **Emit** `AppBus.audioStartRequested` for audio control
+- **Emit** `AppBus.playlistChangeRequested` for playlist changes
+- **Emit/Subscribe** to event callbacks for cross-widget communication
+- **Never** access `server` directly (MainWindow handles routing)
 
 ---
 
-**Document Version:** 2.2  
+## 15. API Quick Reference
+
+### AppBus Signals Summary
+
+| Category             | Signal                    | Parameters                   | Direction        |
+| -------------------- | ------------------------- | ---------------------------- | ---------------- |
+| **Position**         | `pointerUpdated`          | x_m, y_m, ts, source         | Server → Widgets |
+| **Playback Control** | `playRequested`           | source                       | Widget → Server  |
+|                      | `pauseRequested`          | source                       | Widget → Server  |
+|                      | `stopRequested`           | source                       | Widget → Server  |
+|                      | `skipRequested`           | source                       | Widget → Server  |
+|                      | `previousRequested`       | source                       | Widget → Server  |
+|                      | `seekRequested`           | source, position             | Widget → Server  |
+| **Audio Modes**      | `audioStartRequested`     | mode, params                 | Widget → Server  |
+|                      | `audioStopRequested`      | mode                         | Widget → Server  |
+|                      | `adaptiveAudioEnabled`    | enabled                      | Widget → Server  |
+|                      | `zoneDjEnabled`           | enabled                      | Widget → Server  |
+|                      | `bypassAudioRequested`    | bypass                       | Widget → Server  |
+| **Volume**           | `volumeChangeRequested`   | device_id, volume            | Widget → Server  |
+|                      | `globalVolumeChanged`     | volume                       | Widget → Server  |
+|                      | `volumeUpdated`           | device_id, volume            | Server → Widgets |
+|                      | `globalVolumeUpdated`     | volume                       | Server → Widgets |
+|                      | `speakerVolumesUpdated`   | {speaker_id: volume, ...}    | Server → Widgets |
+| **Playlist**         | `playlistChangeRequested` | playlist_number              | Widget → Server  |
+|                      | `playlistSelected`        | playlist_id                  | Widget → Server  |
+|                      | `queueUpdated`            | queue_preview, current_track | Server → Widgets |
+| **Playback State**   | `playbackStateChanged`    | widget_id, is_playing        | Bidirectional    |
+|                      | `trackChanged`            | track_name, track_index      | Server → Widgets |
+|                      | `playbackProgressChanged` | progress                     | Server → Widgets |
+| **Zones**            | `zoneRegistered`          | idx, x_m, y_m, ts, source    | Widget → AppBus  |
+|                      | `zoneDeregistered`        | idx, x_m, y_m, ts, source    | Widget → AppBus  |
+|                      | `zoneSelected`            | zone                         | Widget → AppBus  |
+|                      | `zoneCreated`             | zone                         | Widget → AppBus  |
+|                      | `zoneDeleted`             | zone                         | Widget → AppBus  |
+|                      | `zoneMoved`               | zone, new_x, new_y           | Widget → AppBus  |
+| **Floorplan**        | `floorplanCornerMarked`   | corner_idx, x_px, y_px       | Widget → AppBus  |
+|                      | `floorplanImageLoaded`    | image_path                   | Widget → AppBus  |
+|                      | `homographyComputed`      | homography_matrix            | Widget → AppBus  |
+| **System**           | `serverStatusChanged`     | status                       | Server → Widgets |
+|                      | `simulationSpeedChanged`  | speed                        | Bidirectional    |
+|                      | `settingsChanged`         | key, value                   | Bidirectional    |
+
+### DummyServer Methods Summary
+
+| Category        | Method                            | Parameters      | Returns               |
+| --------------- | --------------------------------- | --------------- | --------------------- |
+| **Lifecycle**   | `start()`                         | -               | None                  |
+|                 | `stop()`                          | -               | None                  |
+| **Audio Modes** | `adaptive_audio_demo()`           | -               | None                  |
+|                 | `stop_adaptive_audio_demo()`      | -               | None                  |
+|                 | `zone_dj_demo(**params)`          | params dict     | None                  |
+|                 | `stop_zone_dj_demo()`             | -               | None                  |
+|                 | `enable_adaptive_audio(enabled)`  | bool            | None                  |
+|                 | `enable_zone_dj(enabled)`         | bool            | None                  |
+|                 | `bypass_audio_processing(bypass)` | bool            | None                  |
+| **Playback**    | `play()`                          | -               | None                  |
+|                 | `pause()`                         | -               | None                  |
+|                 | `stop_playback()`                 | -               | None                  |
+|                 | `skip_track()`                    | -               | None                  |
+|                 | `previous_track()`                | -               | None                  |
+|                 | `seek(position)`                  | float (0.0-1.0) | None                  |
+|                 | `is_playing()`                    | -               | bool                  |
+|                 | `get_playback_progress()`         | -               | float (0.0-1.0)       |
+| **Playlist**    | `set_playlist(number)`            | int (1-5)       | None                  |
+|                 | `get_playlist(id)`                | int             | list                  |
+|                 | `get_current_track()`             | -               | str                   |
+|                 | `get_queue_preview(count)`        | int             | list                  |
+| **Volume**      | `set_volume(device_id, volume)`   | int, int        | None                  |
+|                 | `set_global_volume(volume)`       | int             | None                  |
+|                 | `get_volume(device_id)`           | int             | int                   |
+|                 | `get_speaker_states()`            | -               | dict                  |
+|                 | `get_speaker_volumes()`           | -               | Dict[int, int]        |
+|                 | `get_speaker_positions()`         | -               | Dict[int, np.ndarray] |
+| **State**       | `get_audio_state()`               | -               | dict                  |
+|                 | `get_zone_state()`                | -               | dict                  |
+| **Attributes**  | `user_position`                   | -               | np.ndarray (use lock) |
+|                 | `current_playlist`                | -               | list                  |
+|                 | `current_track_index`             | -               | int                   |
+|                 | `volumes`                         | -               | dict                  |
+|                 | `simulation_speed`                | -               | float                 |
+
+### MiniPlayer Methods Summary
+
+| Category           | Signal/Method                   | Parameters | Type   |
+| ------------------ | ------------------------------- | ---------- | ------ |
+| **Signals**        | `playRequested`                 | -          | Signal |
+|                    | `pauseRequested`                | -          | Signal |
+|                    | `stopRequested`                 | -          | Signal |
+|                    | `skipRequested`                 | -          | Signal |
+|                    | `previousRequested`             | -          | Signal |
+|                    | `seekRequested`                 | float      | Signal |
+|                    | `volumeChanged`                 | int        | Signal |
+|                    | `playlistSelected`              | int        | Signal |
+|                    | `shuffleToggled`                | bool       | Signal |
+|                    | `repeatToggled`                 | bool       | Signal |
+| **Update Methods** | `update_queue_list(queue)`      | list       | Method |
+|                    | `update_current_track(track)`   | str        | Method |
+|                    | `set_track_name(name)`          | str        | Method |
+|                    | `set_progress(progress)`        | float      | Method |
+|                    | `set_volume_slider(volume)`     | int        | Method |
+|                    | `set_playing_state(is_playing)` | bool       | Method |
+|                    | `set_playlist_dropdown(id)`     | int        | Method |
+|                    | `clear_queue()`                 | -          | Method |
+
+### MainWindow Polling Strategy
+
+| Timer                  | Frequency    | Polls                            | Emits                     |
+| ---------------------- | ------------ | -------------------------------- | ------------------------- |
+| `_position_timer`      | 20Hz (50ms)  | `server.user_position`           | `pointerUpdated`          |
+| `_queue_timer`         | 1Hz (1000ms) | `server.get_queue_preview()`     | `queueUpdated`            |
+| `_speaker_volumes_timer` | 5Hz (200ms) | `server.get_speaker_volumes()`   | `speakerVolumesUpdated`   |
+|                   |              | `server.get_current_track()`     | `trackChanged`            |
+|                   |              | `server.get_playback_progress()` | `playbackProgressChanged` |
+|                   |              | `server.get_speaker_states()`    | `volumeUpdated`           |
+
+### Data Flow Patterns
+
+**Pattern 1: User Action → Server Method**
+
+```
+User clicks button → MiniPlayer emits signal → Widget handler → 
+AppBus.emit() → MainWindow handler → Server method call → State change
+```
+
+**Pattern 2: Server State → UI Update**
+
+```
+MainWindow polls server (1Hz/20Hz) → Read state → 
+AppBus.emit() → Widget handler → Update UI component
+```
+
+**Pattern 3: Cross-Widget Communication**
+
+```
+WidgetA action → AppBus.emit(callback signal) → 
+WidgetB handler → Update WidgetB state
+```
+
+---
+
+**Document Version:** 4.0  
 **Last Updated:** 2025-01-11  
 **Author:** Architecture Planning Team  
 **References:** [PR #15 - DummyServer Implementation](https://github.com/Hong-yiii/uwb-localization-mesh/pull/15)
 
 **Change Log:**
 
+- v4.0: **COMPREHENSIVE API DOCUMENTATION** - Complete reference for all methods, signals, and patterns
+  - ✅ Complete AppBus Signal Reference (~30 signals organized by category)
+  - ✅ Complete DummyServer API Reference (all lifecycle, playback, volume, playlist methods)
+  - ✅ Complete MainWindow Routing Table (all signal handlers with code examples)
+  - ✅ Dual Polling Strategy (position @ 20Hz, queue/playback @ 1Hz)
+  - ✅ Complete MiniPlayer API (all signals and update methods)
+  - ✅ Complete Widget Integration Example (AdaptiveAudioWidget with all controls)
+  - ✅ Playback Control Patterns (play, pause, stop, skip, previous, seek)
+  - ✅ Queue Management (display, updates, synchronization via polling)
+  - ✅ Volume Control Patterns (per-device and global volume)
+  - ✅ Audio Mode Controls (enable/disable adaptive, zone_dj, bypass)
+  - ✅ Bidirectional Data Flow (commands out, state updates in)
+- v3.0: **MAJOR**: Unified architecture - ALL communication via AppBus (audio commands, event callbacks)
+  - Added audio command signals to AppBus (audioStartRequested, playlistChangeRequested, etc.)
+  - Added event callback signals for cross-widget communication
+  - MainWindow routes AppBus audio signals to server methods (thread-safe)
+  - Widgets no longer call server methods directly
+  - Solved thread safety issues via Qt signal system
+  - Updated all code examples to use AppBus pattern
+- v2.3: Clarified component hierarchy (3 layers), emphasized NO duplication of mini_player/viz_floorplan
+- v2.2: Removed remaining MQTT references from testing and glossary
 - v2.1: Added thread safety limitations for audio method calls
 - v2.0: Removed all MQTT references - direct integration only
 - v1.1: Added audio demo methods from PR #15
