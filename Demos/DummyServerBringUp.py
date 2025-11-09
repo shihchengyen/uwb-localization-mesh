@@ -3,6 +3,16 @@ Dummy Server Bring-up for testing and demos without physical hardware.
 Simulates user movement and generates fake UWB measurements.
 """
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path so we can import packages
+# This allows the script to be run from any directory
+script_dir = Path(__file__).parent.resolve()
+repo_root = script_dir.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
 import json
 import logging
 import threading
@@ -130,6 +140,7 @@ class DummyServerBringUpProMax:
             self.current_pair: Optional[str] = None  # "front" or "back"
             self.started_for_pair: Optional[str] = None
             self.volumes = {0: 70, 1: 70, 2: 70, 3: 70}
+            self._volumes_lock = threading.Lock()  # Thread-safe access to volumes
             self._last_position = None
             
             print("🎛️ Dummy Follow-Me Audio Server initialized (no MQTT connection)")
@@ -422,10 +433,11 @@ class DummyServerBringUpProMax:
 
             # Simulate setting active volumes
             if self.volumes:
-                self.volumes[2] = left_vol
-                self.volumes[3] = right_vol
-                self.volumes[0] = 0
-                self.volumes[1] = 0
+                with self._volumes_lock:
+                    self.volumes[2] = left_vol
+                    self.volumes[3] = right_vol
+                    self.volumes[0] = 0
+                    self.volumes[1] = 0
 
         else:  # back
             # Active: speakers 1 (LEFT), 0 (RIGHT). Inactive: 2,3
@@ -438,10 +450,11 @@ class DummyServerBringUpProMax:
                 self.started_for_pair = pair
 
             if self.volumes:
-                self.volumes[1] = left_vol
-                self.volumes[0] = right_vol
-                self.volumes[2] = 0
-                self.volumes[3] = 0
+                with self._volumes_lock:
+                    self.volumes[1] = left_vol
+                    self.volumes[0] = right_vol
+                    self.volumes[2] = 0
+                    self.volumes[3] = 0
 
         self.current_pair = pair
 
@@ -470,7 +483,8 @@ class DummyServerBringUpProMax:
 
         # Track local volume state (for live monitoring)
         if command == "volume" and rpi_id is not None and volume is not None and self.volumes:
-            self.volumes[rpi_id] = clamp(volume) if 'clamp' in globals() else max(0, min(100, volume))
+            with self._volumes_lock:
+                self.volumes[rpi_id] = clamp(volume) if 'clamp' in globals() else max(0, min(100, volume))
 
     def _handle_measurement(self, measurement: Measurement):
         """
@@ -591,6 +605,32 @@ class DummyServerBringUpProMax:
 
             # Sleep briefly to prevent tight loop
             time.sleep(0.01)
+    
+    def get_speaker_volumes(self) -> Dict[int, int]:
+        """
+        Get current speaker volumes (thread-safe).
+        
+        Returns:
+            Dict mapping speaker_id (0-3) to volume (0-100)
+        """
+        if not hasattr(self, 'volumes') or not self.volumes:
+            return {}
+        with self._volumes_lock:
+            return self.volumes.copy()
+    
+    def get_speaker_positions(self) -> Dict[int, np.ndarray]:
+        """
+        Get speaker positions in world coordinates (meters).
+        Speakers are located at anchor positions.
+        
+        Returns:
+            Dict mapping speaker_id (0-3) to position [x_m, y_m, z_m]
+        """
+        positions = {}
+        for speaker_id, pos_cm in self.true_nodes.items():
+            # Convert from cm to meters
+            positions[speaker_id] = pos_cm / 100.0
+        return positions
 
 if __name__ == "__main__":
     import argparse

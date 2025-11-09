@@ -5,7 +5,11 @@ Reusable `FloorplanView` widget for PyQt5 that supports:
 - Manual corner marking (TL, TR, BR, BL) and **Auto Transform**
 - World↔Image **homography** and **grid projection** (8×10 by default)
 - Draggable circular **zones** with **3s/1s** presence logic and opacity **fade**
-- A “virtual pointer” for mapping MQTT world positions onto the image
+- A "virtual pointer" for mapping world positions onto the image
+- **Speaker volume visualization** (Adaptive Audio mode)
+  - Speaker icons at corner positions
+  - Real-time volume bars and percentage display
+  - Automatic positioning based on anchor locations
 
 ## Install (editable)
 
@@ -25,7 +29,12 @@ plan.auto_transform()  # optional
 plan.toggle_place_zones(True)  # click to add circular zones
 plan.clear_zones()
 plan.clear_mapping()
-plan.map_pointer(x_m, y_m, ts, source="mqtt")
+plan.map_pointer(x_m, y_m)  # map world coordinates to image
+
+# Speaker visualization (Adaptive Audio)
+plan.set_show_speakers(True)  # Enable speaker visualization
+plan.set_speaker_positions({0: [4.8, 6.0, 0], 1: [0, 6.0, 0], 2: [4.8, 0, 0], 3: [0, 0, 0]})
+plan.set_speaker_volumes({0: 70, 1: 50, 2: 80, 3: 60})  # Update volumes
 ```
 
 ## Signals
