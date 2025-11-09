@@ -142,7 +142,7 @@ class SlidingWindowBinner:
         if not self.measurements_buffer:
             return None
             
-        # Get time range
+        # Get time range 
         current_time = time.time()
         window_start = current_time - self.window_size_seconds
         
