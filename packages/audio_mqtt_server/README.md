@@ -1,40 +1,48 @@
 # Audio MQTT Server
-# Audio control: adapt speakers based on new position
-# FollowMeAudioServer automatically:
-# - Switches between front/back speaker pairs (Y threshold)
-# - Adjusts left/right volumes (X-axis panning)
-# - Sends MQTT commands to RPi clients
+
 Server-side components for adaptive audio control based on user position.
 
 ## Components
 
-### `follow-me_audio_server.py`
-Main server that coordinates UWB positioning and audio control.
+### `follow_me_audio_server.py`
+Contains `AdaptiveAudioServer` class that computes audio state based on position.
 
 **Architecture:**
-- Inherits from `ServerBringUp` to track user position via UWB measurements
-- Controls RPi speakers directly based on position
-- No external dependencies; all logic integrated
+- **Does NOT handle MQTT publishing** - that's done by `ServerBringUpProMax`
+- Computes audio commands and state (volumes, speaker pairs, execution times)
+- Returns structured data to be published by the main server
+- Pure computation logic with no MQTT dependencies
 
-**Usage:**
-```bash
-python packages/audio_mqtt_server/follow-me_audio_server.py --broker localhost --port 1884
-```
-
-**Features:**
-- Monitors user position at ~10 Hz
-- Automatically switches between front/back speaker pairs
-- Adjusts left/right volume based on horizontal position
-- Optional `--no-audio` flag to disable audio control (position tracking only)
+**Key Methods:**
+- `compute_adaptive_audio_state(position, global_time)` - Returns commands for adaptive audio based on position
+- `compute_zone_dj_state(global_time)` - Returns commands for Zone DJ mode (all speakers at 70%)
+- `compute_pause_all_state(global_time)` - Returns pause commands for all speakers
 
 **Audio Logic:**
-- **Front/Back:** Y >= 300 → back speakers (1,0); Y < 300 → front speakers (2,3)
+- **Front/Back:** Y >= 300 → back speakers (RPi 1,0); Y < 300 → front speakers (RPi 2,3)
 - **Left/Right Panning:** Volume varies around X=240 center
   - Moving right: increase LEFT speaker, decrease RIGHT speaker
   - Moving left: increase RIGHT speaker, decrease LEFT speaker
 
+**Return Format:**
+```python
+{
+    'commands': [
+        {
+            'command': 'start|pause|volume',
+            'rpi_id': 0-3,  # Explicit RPi ID (not just pair name)
+            'volume': 0-100 or None,
+            'execute_time': float  # Global time for execution
+        },
+        ...
+    ],
+    'volumes': {0: vol, 1: vol, 2: vol, 3: vol},
+    'current_pair': 'front' or 'back'  # For logging/status only
+}
+```
+
 ### `adaptive_audio_controller.py` (DEPRECATED)
-Old standalone audio controller. This logic has been integrated into `follow-me_audio_server.py`.
+Old standalone audio controller. Logic has been refactored into `AdaptiveAudioServer` in `follow_me_audio_server.py`.
 
 ## Audio Files
 
@@ -49,26 +57,76 @@ Old standalone audio controller. This logic has been integrated into `follow-me_
 
 ## Message Format
 
+MQTT messages published to RPi clients:
+
 ```json
 {
   "command": "start|pause|volume",
-  "execute_time": 1234567890.123,
-  "global_time": 1234567890.0,
-  "delay_ms": 500,
-  "timestamp": "2024-01-01T00:00:00Z",
-  "rpi_id": 0,
+  "execute_time": 1234567890.123,  // Absolute time (seconds since epoch)
+  "rpi_id": 0,  // 0-3, or null for broadcast
   "command_id": "uuid",
   "target_volume": 70  // Only for "volume" command
 }
 ```
 
+**Note:** RPi clients only need `execute_time` to know when to execute. They calculate their own delay by comparing `execute_time` to their local `time.time()`.
+
 ## Architecture Flow
 
 ```
-ServerBringUp (UWB positioning)
-    ↓ tracks position
-FollowMeAudioServer (extends ServerBringUp)
-    ↓ controls audio based on position
-FollowMeAudioClient (on RPi)
-    ↓ plays audio
+ServerBringUpProMax (Server_bring_up_with_Audio.py)
+    ├─ Tracks user position via UWB/PGO
+    ├─ Runs _adaptive_audio_loop() or _zone_dj_loop() in background threads
+    │
+    ├─→ AdaptiveAudioServer (follow_me_audio_server.py)
+    │   └─ Computes audio state based on position
+    │   └─ Returns commands with explicit rpi_id values (0-3)
+    │
+    └─→ Publishes MQTT commands to topics:
+        ├─ audio/commands/rpi_0
+        ├─ audio/commands/rpi_1
+        ├─ audio/commands/rpi_2
+        ├─ audio/commands/rpi_3
+        └─ audio/commands/broadcast (if rpi_id is null)
+            ↓
+        FollowMeAudioClient (on each RPi)
+            └─ Receives commands and plays audio
 ```
+
+## Usage
+
+The audio server is used by `ServerBringUpProMax`:
+
+```python
+from Server_bring_up_with_Audio import ServerBringUpProMax
+from packages.uwb_mqtt_server.config import MQTTConfig
+
+server = ServerBringUpProMax(mqtt_config=MQTTConfig(...))
+server.start()
+
+# Start adaptive audio (polls position every 100ms)
+server.adaptive_audio_start()
+
+# Or start zone DJ mode (all speakers at 70%)
+server.zone_dj_start()
+
+# Stop audio
+server.adaptive_audio_stop()
+# or
+server.zone_dj_stop()
+```
+
+## Key Design Decisions
+
+1. **Separation of Concerns:**
+   - `AdaptiveAudioServer`: Pure computation, no MQTT
+   - `ServerBringUpProMax`: Handles MQTT publishing and threading
+
+2. **Explicit RPi IDs:**
+   - Even though audio logic uses "front"/"back" pairs conceptually, commands contain explicit `rpi_id` values (0-3)
+   - This ensures correct MQTT topic routing (`audio/commands/rpi_{id}`)
+
+3. **Threading:**
+   - `_adaptive_audio_loop()` runs in a background thread, polling `user_position` every 100ms
+   - `_zone_dj_loop()` runs in a separate thread for Zone DJ mode
+   - Both can be started/stopped independently

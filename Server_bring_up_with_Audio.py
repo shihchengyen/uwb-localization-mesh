@@ -1,46 +1,21 @@
 """
-Server Bring-Up with Audio Control:
-
-calls MQTT, binning, PGO, and adaptive audio control prom their packages
-
-Architecture:
-- ServerBringUp: Processes UWB measurements, bins data, runs PGO to track user position
-- FollowMeAudioServer: Controls RPi speakers based on user position
-  - Inherits position tracking from ServerBringUp
-  - Sends MQTT commands to RPi audio clients
-- FollowMeAudioClient: Runs on each RPi, receives commands and plays audio
-
-Audio Control:
-- Automatic: Based on user position
-  - Y >= 300: Back speakers (RPi 1,0)
-  - Y < 300: Front speakers (RPi 2,3)
-  - X-axis panning around X=240: Volume varies left/right
-- Manual: Keyboard shortcuts
-  - 's': Start all speakers
-  - 'p': Pause all speakers
-  - 'i': Show status (current pair, volumes, active/inactive)
-  - 'q': Quit gracefully
-  - Ctrl+C: Emergency stop
-
-Usage:
-    uv run Server_bring_up_with_Audio.py --broker 192.168.68.70 --port 1884
-
-Components:
-- UWB MQTT Server: Receives UWB measurements from anchors
-- PGO Solver: Calculates user position
-- Follow-Me Audio Server: Adapts audio based on position
+Server bring-up script that coordinates MQTT, binning, and PGO, audio control.
+Maintains global state and orchestrates the full processing pipeline.
 """
 
 import json
 import logging
 import threading
 import time
+import datetime
+from datetime import timezone
 from collections import defaultdict
 from queue import Queue
 from typing import Dict, Optional, Union
 
 import numpy as np
-
+import uuid
+import paho.mqtt.client as mqtt
 from packages.datatypes.datatypes import Measurement, BinnedData, AnchorConfig
 from packages.localization_algos.binning.sliding_window import SlidingWindowBinner, BinningMetrics
 from packages.localization_algos.edge_creation.transforms import create_relative_measurement
@@ -48,7 +23,7 @@ from packages.localization_algos.edge_creation.anchor_edges import create_anchor
 from packages.localization_algos.pgo.solver import PGOSolver
 from packages.uwb_mqtt_server.server import UWBMQTTServer
 from packages.uwb_mqtt_server.config import MQTTConfig
-from packages.audio_mqtt_server.follow_me_audio_server import FollowMeAudioServer
+from packages.audio_mqtt_server.follow_me_audio_server import AdaptiveAudioServer, clamp
 
 # Setup JSON logging
 logging.basicConfig(
@@ -57,19 +32,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class ServerBringUp:
+
+# Defaults
+DEFAULT_BROKER_IP = "localhost"
+DEFAULT_BROKER_PORT = 1884
+DEFAULT_USERNAME = "laptop"
+DEFAULT_PASSWORD = "laptop"
+
+
+
+class ServerBringUpProMax:
     """
     Central server that coordinates:
     1. MQTT measurement ingestion
     2. Binning and edge creation
     3. PGO solving
     4. State management
-    5. Adaptive audio control based on user position
-    
-    Audio Control:
-    - Automatically adjusts speakers as user moves (see docstring at top of file)
-    - Manual control via keyboard: 's'=start all, 'p'=pause all, 'i'=status, 'q'=quit
-    - FollowMeAudioServer handles MQTT commands to RPi clients
     """
     
     def __init__(
@@ -87,14 +65,11 @@ class ServerBringUp:
             1: np.array([0, 600, 0]),    # top-left
             2: np.array([480, 0, 0]),    # bottom-right
             3: np.array([0, 0, 0])       # bottom-left (origin in XY, but at sensor height in Z)
-        }
+        } 
         
         # Working copy of nodes that can be jittered (jittering temporarily disabled)
         self.nodes = self.true_nodes.copy()
         self.jitter_std = jitter_std
-        
-        # if jitter_std > 0:
-        #     self._apply_jitter()
         
         # Create anchor config for edge creation (using true positions for now)
         self.anchor_config = AnchorConfig(positions=self.nodes)
@@ -102,6 +77,7 @@ class ServerBringUp:
         # Latest state
         self.data: Dict[int, BinnedData] = {}  # phone_node_id -> latest binned data
         self.user_position: Optional[np.ndarray] = None  # User position
+        self._position_lock = threading.Lock()  # Thread-safe access to user_position
         
         # Processing settings
         self.window_size_seconds = window_size_seconds
@@ -126,20 +102,33 @@ class ServerBringUp:
             on_measurement=self._handle_measurement
         )
 
-        # Initialize Follow-Me Audio Server
-        # Controls RPi speakers based on user position (see update_position call in _process_measurements)
-        self.follow_me_audio_server = FollowMeAudioServer(
-            broker=mqtt_config.broker,
-            port=mqtt_config.port
-        )
-
+        # Audio server (computes state, doesn't publish)
+        self.adaptive_audio_server = AdaptiveAudioServer()
         
+        # Audio MQTT setup for publishing commands
+        client_id = f"server_bring_up_pro_max_{uuid.uuid4()}"
+        self.audio_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
+        self.audio_client.username_pw_set(username=DEFAULT_USERNAME, password=DEFAULT_PASSWORD)
+        self.audio_topic = "audio/commands"
+        
+        # Connect MQTT for audio
+        self.audio_client.connect(mqtt_config.broker, mqtt_config.port, mqtt_config.keepalive)
+        self.audio_client.loop_start()
+
+        # Audio loop control
+        self._adaptive_audio_active = threading.Event()
+        self._zone_dj_active = threading.Event()
+        self._adaptive_audio_thread: Optional[threading.Thread] = None
+        self._zone_dj_thread: Optional[threading.Thread] = None
+
         # Processing thread control
         self._stop_event = threading.Event()
         self._processor_thread = threading.Thread(
             target=self._process_measurements,
             daemon=True
         )
+        
+        print("🎛️ Server Bring-Up Pro Max initialized")
         
         logger.info(json.dumps({
             "event": "server_initialized",
@@ -156,24 +145,179 @@ class ServerBringUp:
                 )
             return self._filtered_binners[phone_id]
         
+    def _publish(self, topic: str, payload_obj: dict) -> None:
+        """Publish MQTT message."""
+        payload = json.dumps(payload_obj, separators=(",", ":"))
+        self.audio_client.publish(topic, payload, qos=1)
+
+    def _publish_commands(self, commands: list) -> None:
+        """
+        Publish audio commands to MQTT.
+        
+        Args:
+            commands (list of command dicts from AdaptiveAudioServer)
+        """
+        for cmd in commands:
+            msg = {
+                "command": cmd['command'],
+                "execute_time": cmd['execute_time'],
+                "rpi_id": cmd['rpi_id'],
+                "command_id": str(uuid.uuid4()),
+            }
+            if cmd['volume'] is not None:
+                msg["target_volume"] = clamp(cmd['volume'])
+
+            if cmd['rpi_id'] is None:
+                topic = f"{self.audio_topic}/broadcast"
+            else:
+                topic = f"{self.audio_topic}/rpi_{cmd['rpi_id']}"
+            
+            self._publish(topic, msg)
+
+
     def start(self):
         """Start the server and processing thread."""
         # Start MQTT
         self.uwb_mqtt_server.start()
-        
+
         # Start processor
         self._processor_thread.start()
-        
+
         logger.info(json.dumps({
             "event": "server_started"
         }))
+    
+    def adaptive_audio_start(self):
+        """Start the adaptive audio demo in a background thread."""
+        if self._adaptive_audio_thread is None or not self._adaptive_audio_thread.is_alive():
+            self._adaptive_audio_active.set()
+            self._adaptive_audio_thread = threading.Thread(
+                target=self._adaptive_audio_loop,
+                daemon=True
+            )
+            self._adaptive_audio_thread.start()
+            logger.info(json.dumps({"event": "adaptive_audio_started"}))
+
+    def adaptive_audio_stop(self):
+        """Stop the adaptive audio demo background thread."""
+        self._adaptive_audio_active.clear()
+        # Send pause commands
+        global_time = time.time()
+        pause_state = self.adaptive_audio_server.compute_pause_all_state(global_time)
+        self._publish_commands(pause_state['commands'])
+        logger.info(json.dumps({"event": "adaptive_audio_stopped"}))
+
+    def _adaptive_audio_loop(self):
+        """
+        Background loop for adaptive audio demo.
         
+        Polls user position and publishes commands to specific RPi topics.
+        Even though audio_state reports "front" or "back" pairs conceptually,
+        the commands contain explicit rpi_id values (0, 1, 2, 3) which are used
+        to publish to the correct MQTT topics (e.g., audio/commands/rpi_2).
+        """
+        update_interval = 0.1  # Update every 100ms
+        while self._adaptive_audio_active.is_set() and not self._stop_event.is_set():
+            try:
+                # Get current position (thread-safe)
+                with self._position_lock:
+                    position = self.user_position
+                
+                if position is not None:
+                    # Compute audio state (returns commands with explicit rpi_id values)
+                    global_time = time.time()
+                    audio_state = self.adaptive_audio_server.compute_adaptive_audio_state(
+                        position, global_time
+                    )
+                    
+                    # Publish commands to specific RPi topics based on rpi_id in each command
+                    if audio_state['commands']:
+                        self._publish_commands(audio_state['commands'])
+                        
+                        # Log status
+                        vols = audio_state['volumes']
+                        pair = audio_state['current_pair'] or "unknown"
+                        logger.debug(json.dumps({
+                            "event": "adaptive_audio_update",
+                            "pair": pair,
+                            "volumes": vols,
+                            "n_commands": len(audio_state['commands'])
+                        }))
+                
+                time.sleep(update_interval)
+            except Exception as e:
+                logger.error(json.dumps({
+                    "event": "adaptive_audio_loop_error",
+                    "error": str(e)
+                }))
+                time.sleep(update_interval)
+
+    def zone_dj_start(self):
+        """Start the zone DJ demo in a background thread."""
+        if self._zone_dj_thread is None or not self._zone_dj_thread.is_alive():
+            self._zone_dj_active.set()
+            self._zone_dj_thread = threading.Thread(
+                target=self._zone_dj_loop,
+                daemon=True
+            )
+            self._zone_dj_thread.start()
+            logger.info(json.dumps({"event": "zone_dj_started"}))
+
+    def zone_dj_stop(self):
+        """Stop the zone DJ demo background thread."""
+        self._zone_dj_active.clear()
+        # Send pause commands
+        global_time = time.time()
+        pause_state = self.adaptive_audio_server.compute_pause_all_state(global_time)
+        self._publish_commands(pause_state['commands'])
+        logger.info(json.dumps({"event": "zone_dj_stopped"}))
+
+    def _zone_dj_loop(self):
+        """Background loop for zone DJ demo."""
+        # Zone DJ starts once, then just maintains
+        global_time = time.time()
+        zone_dj_state = self.adaptive_audio_server.compute_zone_dj_state(global_time)
+        self._publish_commands(zone_dj_state['commands'])
+        
+        logger.info(json.dumps({
+            "event": "zone_dj_initialized",
+            "volumes": zone_dj_state['volumes']
+        }))
+        
+        # Keep thread alive while active (can be extended for periodic updates)
+        while self._zone_dj_active.is_set() and not self._stop_event.is_set():
+            time.sleep(0.5)
+
+    def set_playlist(self, playlist_number: int):
+        """
+        Set the current playlist by number (1-5).
+        Reserved for future functionality to choose songs.
+        """
+        self.adaptive_audio_server.set_playlist(playlist_number)
+        logger.info(json.dumps({
+            "event": "playlist_set",
+            "playlist_number": playlist_number
+        }))
+
     def stop(self):
         """Stop all processing."""
         self._stop_event.set()
-        self.uwb_mqtt_server.stop()
-        self.follow_me_audio_server.shutdown()
         
+        # Stop audio loops
+        self.adaptive_audio_stop()
+        self.zone_dj_stop()
+        
+        # Wait for threads to finish
+        if self._adaptive_audio_thread and self._adaptive_audio_thread.is_alive():
+            self._adaptive_audio_thread.join(timeout=1.0)
+        if self._zone_dj_thread and self._zone_dj_thread.is_alive():
+            self._zone_dj_thread.join(timeout=1.0)
+        
+        # Stop MQTT
+        self.uwb_mqtt_server.stop()
+        self.audio_client.loop_stop()
+        self.audio_client.disconnect()
+
         logger.info(json.dumps({
             "event": "server_stopped"
         }))
@@ -294,12 +438,10 @@ class ServerBringUp:
                             )
                             
                             if pgo_result.success:
-                                # Update user position from anchored results
-                                self.user_position = pgo_result.node_positions[f'phone_{phone_id}']
-                                
-                                # Notify follow-me audio server of position update
-                                self.follow_me_audio_server.update_position(self.user_position)
-                                
+                                # Update user position from anchored results (thread-safe)
+                                with self._position_lock:
+                                    self.user_position = pgo_result.node_positions[f'phone_{phone_id}']
+
                                 logger.info(json.dumps({
                                     "event": "position_updated",
                                     "phone_id": phone_id,
@@ -327,6 +469,8 @@ class ServerBringUp:
             # Sleep briefly to prevent tight loop
             time.sleep(0.01)
 
+
+
 if __name__ == "__main__":
     import argparse
     
@@ -350,7 +494,7 @@ if __name__ == "__main__":
     }))
     
     # Start server (jitter temporarily disabled)
-    server = ServerBringUp(
+    server = ServerBringUpProMax(
         mqtt_config=mqtt_config,
         jitter_std=0.0  # Jittering disabled
     )
@@ -358,44 +502,11 @@ if __name__ == "__main__":
     try:
         server.start()
         
-        #########################################################
-        # Keyboard control for audio server
-        print("\nKeyboard: 's' START ALL, 'p' PAUSE ALL, 'i' STATUS, 'q' QUIT")
-        shutdown_event = threading.Event()
-        
-        def keyboard_loop():
-            while not shutdown_event.is_set():
-                try:
-                    cmd = input().strip().lower()
-                    if cmd == "q":
-                        shutdown_event.set()
-                        break
-                    elif cmd == "s":
-                        server.follow_me_audio_server.start_all()
-                    elif cmd == "p":
-                        server.follow_me_audio_server.pause_all()
-                    elif cmd == "i":
-                        # Show audio status
-                        status = server.follow_me_audio_server.get_status()
-                        print(f"\n📊 Audio Status:")
-                        print(f"   Pair: {status['current_pair']}")
-                        print(f"   Active speakers: {status['active_speakers']}")
-                        print(f"   Inactive speakers: {status['inactive_speakers']}")
-                        print(f"   Volumes: R0={status['volumes'][0]}%  R1={status['volumes'][1]}%  R2={status['volumes'][2]}%  R3={status['volumes'][3]}%")
-                except (EOFError, KeyboardInterrupt):
-                    shutdown_event.set()
-                    break
-        
-        threading.Thread(target=keyboard_loop, daemon=True).start()
-        #########################################################
-
         # Keep main thread alive
-        while not shutdown_event.is_set():
+        while True:
             if server.user_position is not None:
                 print(f"Current position: {server.user_position}")
             time.sleep(1)
             
     except KeyboardInterrupt:
-        print("\nShutting down...")
-    finally:
         server.stop()

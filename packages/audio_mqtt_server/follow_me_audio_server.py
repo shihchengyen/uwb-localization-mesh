@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Follow-Me Audio Server
+Follow-Me Methods for audio control
 
 Coordinates UWB positioning (via ServerBringUp) and adaptive audio control.
 ServerBringUp tracks user position and adapts audio accordingly.
@@ -19,7 +19,7 @@ Logic:
   - Move right → increase LEFT speaker volume, decrease RIGHT speaker volume
 
 Usage:
-    python follow-me_audio_server.py --broker localhost --port 1884
+    uv run follow-me_audio_server.py --broker localhost --port 1884
 
 """
 
@@ -39,11 +39,6 @@ logging.getLogger().setLevel(logging.WARNING)
 logging.getLogger("Server_bring_up").setLevel(logging.WARNING)
 logging.getLogger("packages.uwb_mqtt_server").setLevel(logging.WARNING)
 
-# # Add repo root to path to import packages and ServerBringUp
-# sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-# from packages.uwb_mqtt_server.config import MQTTConfig
-# from Server_bring_up import ServerBringUp
-
 
 # Defaults
 DEFAULT_BROKER_IP = "localhost"
@@ -57,64 +52,177 @@ def clamp(value: float, lo: int = 0, hi: int = 100) -> int:
     return max(lo, min(hi, v))
 
 
-class FollowMeAudioServer:
+class AdaptiveAudioServer:
     """
-    Audio controller that sends commands to RPi speakers based on position.
+    Audio controller that computes audio state based on position.
     
-    Should be called from ServerBringUp where position updates are processed.
+    Returns commands and state information to be published by ServerBringUp.
+    Does not handle MQTT publishing bc it's done by the main server.
     """
     
-    def __init__(self, broker: str, port: int, keepalive: int = 60):
-        """Initialize audio server with MQTT connection."""
-        
-        # Audio MQTT setup
-        client_id = f"follow_me_audio_server_{uuid.uuid4()}"
-        self.audio_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
-        self.audio_client.username_pw_set(username=DEFAULT_USERNAME, password=DEFAULT_PASSWORD)
-
-        self.audio_topic = "audio/commands"
-
-        # State
+    def __init__(self):
+        """Initialize audio server state."""
         self.current_pair: Optional[str] = None  # "front" or "back"
         self.started_for_pair: Optional[str] = None
         self.volumes = {0: 70, 1: 70, 2: 70, 3: 70}
-        self._last_position = None
+        self._last_position: Optional[np.ndarray] = None
 
-        # Connect MQTT for audio
-        self.audio_client.connect(broker, port, keepalive)
-        self.audio_client.loop_start()
+    def compute_adaptive_audio_state(self, position, global_time: float, execute_delay_ms: int = 500) -> dict:
+        """
+        Compute adaptive audio state based on user position.
         
-        print("🎛️ Follow-Me Audio Server initialized")
-        # print(f"   MQTT: {broker}:{port}")
+        Args:
+            position: numpy array or tuple [x, y, z] in cm
+            global_time: Current global time (seconds since epoch)
+            execute_delay_ms: Delay in milliseconds before executing commands
+            
+        Returns:
+            dict with keys:
+            - 'commands': list of command dicts, each with:
+                - 'command': str ("start", "pause", "volume")
+                - 'rpi_id': int (0-3) or None for broadcast
+                - 'volume': int (0-100) or None
+                - 'execute_time': float (global time for execution)
+            - 'volumes': dict {0: vol, 1: vol, 2: vol, 3: vol}
+            - 'current_pair': str ("front" or "back")
+        """
+        # Convert to numpy array if needed
+        if not isinstance(position, np.ndarray):
+            position = np.array(position)
+        
+        # Check if position actually changed (avoid redundant updates)
+        if self._last_position is not None:
+            if np.linalg.norm(position - self._last_position) < 1.0:
+                # Return current state without new commands
+                return {
+                    'commands': [],
+                    'volumes': self.volumes.copy(),
+                    'current_pair': self.current_pair
+                }
+        
+        self._last_position = position.copy()
+        
+        # Compute pair and volumes
+        pair, (left_vol, right_vol) = self._compute_pair_and_volumes(position)
+        
+        # Calculate execute time
+        execute_time = global_time + (execute_delay_ms / 1000.0)
+        
+        # Generate commands
+        commands = []
+        
+        if pair == "front":
+            # Active: speakers 2 (LEFT), 3 (RIGHT). Inactive: 0,1
+            # Ensure active pair is started at least once
+            if self.started_for_pair != pair:
+                # Unmute all first to ensure START is heard
+                for r in [0, 1, 2, 3]:
+                    commands.append({
+                        'command': 'volume',
+                        'rpi_id': r,
+                        'volume': 70,
+                        'execute_time': execute_time
+                    })
+                for r in [0, 1, 2, 3]:
+                    commands.append({
+                        'command': 'start',
+                        'rpi_id': r,
+                        'volume': None,
+                        'execute_time': execute_time
+                    })
+                self.started_for_pair = pair
 
-    def _publish(self, topic: str, payload_obj: dict) -> None:
-        payload = json.dumps(payload_obj, separators=(",", ":"))
-        self.audio_client.publish(topic, payload, qos=1)
+            # Set active volumes
+            commands.append({
+                'command': 'volume',
+                'rpi_id': 2,
+                'volume': left_vol,
+                'execute_time': execute_time
+            })
+            commands.append({
+                'command': 'volume',
+                'rpi_id': 3,
+                'volume': right_vol,
+                'execute_time': execute_time
+            })
+            # Mute inactive
+            commands.append({
+                'command': 'volume',
+                'rpi_id': 0,
+                'volume': 0,
+                'execute_time': execute_time
+            })
+            commands.append({
+                'command': 'volume',
+                'rpi_id': 1,
+                'volume': 0,
+                'execute_time': execute_time
+            })
+            
+            # Update local state
+            self.volumes[2] = left_vol
+            self.volumes[3] = right_vol
+            self.volumes[0] = 0
+            self.volumes[1] = 0
 
-    def _send_audio_command(self, command: str, rpi_id: Optional[int] = None, volume: Optional[int] = None) -> None:
-        now = time.time()
-        execute_time = now + 0.5  # 500ms lookahead
-        msg = {
-            "command": command,
-            "execute_time": execute_time,
-            "global_time": now,
-            "delay_ms": 500,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "rpi_id": rpi_id,
-            "command_id": str(uuid.uuid4()),
+        else:  # back
+            # Active: speakers 1 (LEFT), 0 (RIGHT). Inactive: 2,3
+            if self.started_for_pair != pair:
+                for r in [0, 1, 2, 3]:
+                    commands.append({
+                        'command': 'volume',
+                        'rpi_id': r,
+                        'volume': 70,
+                        'execute_time': execute_time
+                    })
+                for r in [0, 1, 2, 3]:
+                    commands.append({
+                        'command': 'start',
+                        'rpi_id': r,
+                        'volume': None,
+                        'execute_time': execute_time
+                    })
+                self.started_for_pair = pair
+
+            commands.append({
+                'command': 'volume',
+                'rpi_id': 1,
+                'volume': left_vol,
+                'execute_time': execute_time
+            })
+            commands.append({
+                'command': 'volume',
+                'rpi_id': 0,
+                'volume': right_vol,
+                'execute_time': execute_time
+            })
+            # Mute inactive
+            commands.append({
+                'command': 'volume',
+                'rpi_id': 2,
+                'volume': 0,
+                'execute_time': execute_time
+            })
+            commands.append({
+                'command': 'volume',
+                'rpi_id': 3,
+                'volume': 0,
+                'execute_time': execute_time
+            })
+            
+            # Update local state
+            self.volumes[1] = left_vol
+            self.volumes[0] = right_vol
+            self.volumes[2] = 0
+            self.volumes[3] = 0
+
+        self.current_pair = pair
+        
+        return {
+            'commands': commands,
+            'volumes': self.volumes.copy(),
+            'current_pair': self.current_pair
         }
-        if volume is not None:
-            msg["target_volume"] = clamp(volume)
-
-        if rpi_id is None:
-            topic = f"{self.audio_topic}/broadcast"
-        else:
-            topic = f"{self.audio_topic}/rpi_{rpi_id}"
-        self._publish(topic, msg)
-
-        # Track local volume state (for live monitoring)
-        if command == "volume" and rpi_id is not None and volume is not None:
-            self.volumes[rpi_id] = clamp(volume)
 
     def _compute_pair_and_volumes(self, position) -> Tuple[str, Tuple[int, int]]:
         """
@@ -145,117 +253,68 @@ class FollowMeAudioServer:
 
         return pair, (left_vol, right_vol)
 
-    def _apply_state(self, pair: str, left_vol: int, right_vol: int) -> None:
-        """Send MQTT commands to apply the given pair and volumes."""
-        if pair == "front":
-            # Active: speakers 2 (LEFT), 3 (RIGHT). Inactive: 0,1
-            # Ensure active pair is started at least once
-            if self.started_for_pair != pair:
-                # Unmute all first to ensure START is heard
-                for r in [0, 1, 2, 3]:
-                    self._send_audio_command("volume", rpi_id=r, volume=70)
-                for r in [0, 1, 2, 3]:
-                    self._send_audio_command("start", rpi_id=r)
-                self.started_for_pair = pair
-
-            # Set active volumes
-            self._send_audio_command("volume", rpi_id=2, volume=left_vol)
-            self._send_audio_command("volume", rpi_id=3, volume=right_vol)
-            # Mute inactive
-            self._send_audio_command("volume", rpi_id=0, volume=0)
-            self._send_audio_command("volume", rpi_id=1, volume=0)
-
-        else:  # back
-            # Active: speakers 1 (LEFT), 0 (RIGHT). Inactive: 2,3
-            if self.started_for_pair != pair:
-                for r in [0, 1, 2, 3]:
-                    self._send_audio_command("volume", rpi_id=r, volume=70)
-                for r in [0, 1, 2, 3]:
-                    self._send_audio_command("start", rpi_id=r)
-                self.started_for_pair = pair
-
-            self._send_audio_command("volume", rpi_id=1, volume=left_vol)
-            self._send_audio_command("volume", rpi_id=0, volume=right_vol)
-            # Mute inactive
-            self._send_audio_command("volume", rpi_id=2, volume=0)
-            self._send_audio_command("volume", rpi_id=3, volume=0)
-
-        self.current_pair = pair
-
-    def update_position(self, position) -> None:
+    def compute_zone_dj_state(self, global_time: float, execute_delay_ms: int = 500) -> dict:
         """
-        Update audio based on new user position.
-        
-        This is the main method called by ServerBringUp when position changes.
+        Compute Zone DJ state: all speakers at 70% volume.
         
         Args:
-            position: numpy array or tuple [x, y, z] in cm
-        """
-        # Convert to numpy array if needed
-        if not isinstance(position, np.ndarray):
-            position = np.array(position)
-        
-        # Check if position actually changed (avoid redundant updates)
-        if self._last_position is not None:
-            if np.linalg.norm(position - self._last_position) < 1.0:
-                return  # Position hasn't changed enough
-        
-        self._last_position = position.copy()
-        
-        # Compute pair and volumes
-        pair, (left_vol, right_vol) = self._compute_pair_and_volumes(position)
-        
-        # Apply audio changes
-        self._apply_state(pair, left_vol, right_vol)
-        
-        # Print status
-        self._print_status()
-    
-    def _print_status(self) -> None:
-        vols = self.volumes
-        pair = self.current_pair or "unknown"
-        line = f"Pair:{pair:>5} | Vols -> R0:{vols[0]:3d}  R1:{vols[1]:3d}  R2:{vols[2]:3d}  R3:{vols[3]:3d}"
-        print(f"\r{line}", end="", flush=True)
-    
-    def start_all(self) -> None:
-        """Start all speakers (manual control)."""
-        for r in [0, 1, 2, 3]:
-            self._send_audio_command("start", rpi_id=r)
-    
-    def pause_all(self) -> None:
-        """Pause all speakers (manual control)."""
-        for r in [0, 1, 2, 3]:
-            self._send_audio_command("pause", rpi_id=r)
-    
-    def get_status(self) -> dict:
-        """
-        Get current audio status.
-        
+            global_time: Current global time (seconds since epoch)
+            execute_delay_ms: Delay in milliseconds before executing commands
+            
         Returns:
             dict with keys:
-            - 'current_pair': "front" or "back"
-            - 'volumes': dict {0: vol, 1: vol, 2: vol, 3: vol}
-            - 'active_speakers': list of active RPi IDs
-            - 'inactive_speakers': list of inactive RPi IDs
+            - 'commands': list of command dicts
+            - 'volumes': dict {0: 70, 1: 70, 2: 70, 3: 70}
         """
-        active = []
-        inactive = []
-        if self.current_pair == "front":
-            active = [2, 3]  # Front pair
-            inactive = [0, 1]
-        elif self.current_pair == "back":
-            active = [1, 0]  # Back pair
-            inactive = [2, 3]
+        execute_time = global_time + (execute_delay_ms / 1000.0)
+        commands = []
+        
+        # Set all volumes to 70%
+        for r in [0, 1, 2, 3]:
+            commands.append({
+                'command': 'volume',
+                'rpi_id': r,
+                'volume': 70,
+                'execute_time': execute_time
+            })
+            self.volumes[r] = 70
+        
+        # Start all speakers
+        for r in [0, 1, 2, 3]:
+            commands.append({
+                'command': 'start',
+                'rpi_id': r,
+                'volume': None,
+                'execute_time': execute_time
+            })
         
         return {
-            "current_pair": self.current_pair,
-            "volumes": self.volumes.copy(),
-            "active_speakers": active,
-            "inactive_speakers": inactive
+            'commands': commands,
+            'volumes': self.volumes.copy()
         }
-    
-    def shutdown(self) -> None:
-        """Shutdown audio server."""
-        self.audio_client.loop_stop()
-        self.audio_client.disconnect()
-        print("\n👋 Follow-Me Audio Server shut down")
+
+    def compute_pause_all_state(self, global_time: float, execute_delay_ms: int = 500) -> dict:
+        """
+        Compute pause all state.
+        
+        Args:
+            global_time: Current global time (seconds since epoch)
+            execute_delay_ms: Delay in milliseconds before executing commands
+            
+        Returns:
+            dict with 'commands' list
+        """
+        execute_time = global_time + (execute_delay_ms / 1000.0)
+        commands = []
+        
+        for r in [0, 1, 2, 3]:
+            commands.append({
+                'command': 'pause',
+                'rpi_id': r,
+                'volume': None,
+                'execute_time': execute_time
+            })
+        
+        return {
+            'commands': commands
+        }

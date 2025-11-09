@@ -1,5 +1,2 @@
-"""FloorplanView - Floorplan Visualization with Homography"""
-
-from .floorplan_view import FloorplanView, Zone
-
-__all__ = ['FloorplanView', 'Zone']
+from .floorplan_view import FloorplanView
+__all__=['FloorplanView']
