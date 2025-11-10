@@ -37,7 +37,7 @@ _import_pkg_fallback()
 from appbus import AppBus
 from services.settings import load_settings
 
-def _start_server_bringup(use_dummy=False, settings=None):
+def _start_server_bringup(use_dummy=False, settings=None, simulation_speed=None):
     """Start the server (DummyServerBringUpProMax for simulation or real ServerBringUp)."""
     if use_dummy:
         # Try multiple import strategies
@@ -53,10 +53,14 @@ def _start_server_bringup(use_dummy=False, settings=None):
             else:
                 raise AttributeError("No DummyServerBringUp class found")
             
-            simulation_speed = settings.value("server/simulation_speed", 1.0, type=float) if settings else 1.0
+            # Use provided speed, or fall back to settings, or default
+            if simulation_speed is not None:
+                speed = simulation_speed
+            else:
+                speed = settings.value("server/simulation_speed", 0.01, type=float) if settings else 0.01
             phone_node_id = settings.value("server/phone_node_id", 0, type=int) if settings else 0
             sb = DummyServerBringUpProMax(
-                simulation_speed=simulation_speed,
+                simulation_speed=speed,
                 phone_node_id=phone_node_id
             )
             if hasattr(sb, "start"):
@@ -72,10 +76,14 @@ def _start_server_bringup(use_dummy=False, settings=None):
         # Strategy 2: Try as package import
         try:
             from Demos.DummyServerBringUp import DummyServerBringUpProMax
-            simulation_speed = settings.value("server/simulation_speed", 1.0, type=float) if settings else 1.0
+            # Use provided speed, or fall back to settings, or default
+            if simulation_speed is not None:
+                speed = simulation_speed
+            else:
+                speed = settings.value("server/simulation_speed", 0.01, type=float) if settings else 0.01
             phone_node_id = settings.value("server/phone_node_id", 0, type=int) if settings else 0
             sb = DummyServerBringUpProMax(
-                simulation_speed=simulation_speed,
+                simulation_speed=speed,
                 phone_node_id=phone_node_id
             )
             if hasattr(sb, "start"):
@@ -182,9 +190,10 @@ class _SettingsDialog(QDialog):
             self.path_edit.setText(filename)
 
 class MainWindow(QMainWindow):
-    def __init__(self, use_dummy=False):
+    def __init__(self, use_dummy=False, simulation_speed=None):
         super().__init__()
         self._use_dummy = use_dummy
+        self._simulation_speed = simulation_speed
         self.setWindowTitle("UWB Localization Visualization - Unified Demo")
         self.resize(1400, 900)
 
@@ -213,7 +222,7 @@ class MainWindow(QMainWindow):
         self.services["shared_floorplan"] = self.shared_floorplan
 
         # Create and start server
-        self.server = _start_server_bringup(use_dummy=use_dummy, settings=self.settings)
+        self.server = _start_server_bringup(use_dummy=use_dummy, settings=self.settings, simulation_speed=self._simulation_speed)
         if self.server is None:
             QMessageBox.critical(self, "Server Error", 
                                "Failed to start server. Use --dummy flag for simulation.")
@@ -1086,11 +1095,13 @@ def main():
     parser = argparse.ArgumentParser(description='Unified Demo')
     parser.add_argument('--dummy', action='store_true',
                       help='Use dummy server for simulation instead of real hardware')
+    parser.add_argument('--speed', type=float, default=None,
+                      help='Simulation speed multiplier (e.g., 0.01 = very slow, 1.0 = normal)')
     args, qt_args = parser.parse_known_args()
 
     # Qt needs its own args
     app = QApplication(qt_args if qt_args else sys.argv)
-    win = MainWindow(use_dummy=args.dummy)
+    win = MainWindow(use_dummy=args.dummy, simulation_speed=args.speed)
     win.show()
     sys.exit(app.exec_())
 
