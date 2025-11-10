@@ -1,399 +1,1006 @@
+"""
+FloorplanView - Floorplan Visualization with Homography
 
-from PyQt5.QtCore import (Qt, QRectF, QPointF, QTimer, QObject, QVariantAnimation, pyqtSignal)
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QGraphicsView, QLabel, QGraphicsScene, QGraphicsEllipseItem, QGraphicsItem, QGraphicsPixmapItem, QGraphicsSimpleTextItem)
-from PyQt5.QtGui import (QPainter, QPen, QColor, QFont, QImage, QPainterPath, QPixmap)
-import numpy as np, math, cv2, time
+A reusable component for displaying floorplan images with world coordinate mapping.
+Supports homography-based transformation, zone management, and pointer tracking.
 
-AREA_WIDTH_M = 4.80
-AREA_HEIGHT_M = 6.00
-GRID_COLS = 8
-GRID_ROWS = 10
-CELL_SIZE_M = AREA_WIDTH_M / GRID_COLS
+Features:
+- Image loading and display
+- 4-point corner marking (manual or auto-detect)
+- Homography computation (world ↔ image transformation)
+- Grid projection (8×10 cells, perspective-correct)
+- Circular zone placement and management
+- Pointer visualization (red dot)
+- Zone registration/deregistration timers
+"""
 
-def apply_homography(H, pts):
-    pts = np.asarray(pts, dtype=np.float64)
-    if pts.ndim == 1:
-        pts = pts.reshape(1, 2)
-    n = pts.shape[0]
-    homo = np.ones((n, 3), dtype=np.float64)
-    homo[:, 0:2] = pts
-    res = homo @ H.T
-    res[:, 0] = res[:, 0] / np.where(res[:, 2] == 0, 1e-9, res[:, 2])
-    res[:, 1] = res[:, 1] / np.where(res[:, 2] == 0, 1e-9, res[:, 2])
-    return res[:, :2]
+import cv2
+import numpy as np
+from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsEllipseItem, QGraphicsLineItem, QGraphicsRectItem, QGraphicsItem, QGraphicsTextItem
+from PyQt5.QtCore import Qt, pyqtSignal as Signal, QPointF, QTimer, QRectF
+from PyQt5.QtGui import QPixmap, QImage, QPen, QBrush, QColor, QPainter, QFont
 
-def order_quad_points(pts):
-    pts = np.array(pts, dtype=np.float32)
-    s = pts.sum(axis=1)
-    diff = np.diff(pts, axis=1).flatten()
-    tl = pts[np.argmin(s)]
-    br = pts[np.argmax(s)]
-    tr = pts[np.argmin(diff)]
-    bl = pts[np.argmax(diff)]
-    return np.array([tl, tr, br, bl], dtype=np.float64)
 
-class ProjectedGridItem(QGraphicsItem):
-    def __init__(self, scene_rect: QRectF, H_world_to_img=None):
-        super().__init__()
-        self.scene_rect = scene_rect
-        self.H = H_world_to_img
-        self.setZValue(3)
+class Zone:
+    """Represents a circular zone in world coordinates."""
+    def __init__(self, zone_id, x_m, y_m, radius_m=0.25):
+        self.id = zone_id
+        self.x = x_m
+        self.y = y_m
+        self.radius = radius_m
+        self.is_active = False
+        self.graphics_item = None  # QGraphicsEllipseItem for visualization
+    
+    def contains(self, x_m, y_m, hitbox_multiplier=1.5):
+        """Check if point is within zone (with hitbox multiplier)."""
+        distance = np.sqrt((x_m - self.x)**2 + (y_m - self.y)**2)
+        return distance <= (self.radius * hitbox_multiplier)
 
-    def boundingRect(self):
-        return self.scene_rect
 
-    def paint(self, painter: QPainter, option, widget=None):
-        if self.H is None:
-            return
-        pen = QPen(QColor(200, 10, 10, 200))
-        pen.setWidthF(1.0)
-        painter.setPen(pen)
+class RectangularZone:
+    """Represents a rectangular zone in world coordinates."""
+    def __init__(self, zone_id, x1_m, y1_m, x2_m, y2_m):
+        self.id = zone_id
+        self.x1 = min(x1_m, x2_m)  # Top-left X
+        self.y1 = min(y1_m, y2_m)  # Top-left Y
+        self.x2 = max(x1_m, x2_m)  # Bottom-right X
+        self.y2 = max(y1_m, y2_m)  # Bottom-right Y
+        self.is_active = False
+        self.graphics_item = None  # QGraphicsRectItem for visualization
+    
+    def contains(self, x_m, y_m, hitbox_multiplier=1.0):
+        """Check if point is within rectangular zone."""
+        return (self.x1 <= x_m <= self.x2 and 
+                self.y1 <= y_m <= self.y2)
 
-        for c in range(GRID_COLS + 1):
-            x_m = c * CELL_SIZE_M
-            ys = np.linspace(0, AREA_HEIGHT_M, 160)
-            pts_world = np.column_stack((np.full_like(ys, x_m), ys))
-            proj = apply_homography(self.H, pts_world)
-            path = QPainterPath(); started = False
-            for (x, y) in proj:
-                if math.isfinite(x) and math.isfinite(y):
-                    if not started: path.moveTo(x, y); started = True
-                    else: path.lineTo(x, y)
-                else:
-                    if started: painter.drawPath(path); path = QPainterPath(); started = False
-            if started: painter.drawPath(path)
 
-        for r in range(GRID_ROWS + 1):
-            y_m = r * CELL_SIZE_M
-            xs = np.linspace(0, AREA_WIDTH_M, 160)
-            pts_world = np.column_stack((xs, np.full_like(xs, y_m)))
-            proj = apply_homography(self.H, pts_world)
-            path = QPainterPath(); started = False
-            for (x, y) in proj:
-                if math.isfinite(x) and math.isfinite(y):
-                    if not started: path.moveTo(x, y); started = True
-                    else: path.lineTo(x, y)
-                else:
-                    if started: painter.drawPath(path); path = QPainterPath(); started = False
-            if started: painter.drawPath(path)
-
-class FloorplanView(QWidget):
-    zoneRegistered = pyqtSignal(object, float, float, float, str)
-    zoneDeregistered = pyqtSignal(object, float, float, float, str)
-    zoneMoved = pyqtSignal(object, float, float)
-    pointerMapped = pyqtSignal(float, float, float, str)
-
-    def __init__(self, parent=None, world_w_m=AREA_WIDTH_M, world_h_m=AREA_HEIGHT_M, grid_cols=GRID_COLS, grid_rows=GRID_ROWS):
+class FloorplanView(QGraphicsView):
+    """
+    Floorplan visualization widget with homography support.
+    
+    Signals:
+        pointerMapped: Emitted when user clicks on floorplan (x_m, y_m)
+        zoneRegistered: Emitted when user enters zone
+        zoneDeregistered: Emitted when user leaves zone
+        cornerMarked: Emitted when corner is marked (corner_idx, x_px, y_px)
+        pixelToMeterMapped: Emitted when user clicks on floorplan or pointer moves (x_px, y_px, x_m, y_m)
+    """
+    
+    pointerMapped = Signal(float, float)  # x_m, y_m when user clicks
+    zoneRegistered = Signal(object)  # Zone object
+    zoneDeregistered = Signal(object)  # Zone object
+    cornerMarked = Signal(int, float, float)  # corner_idx, x_px, y_px
+    pixelToMeterMapped = Signal(float, float, float, float)  # x_px, y_px, x_m, y_m when user clicks
+    homographyComputed = Signal()  # Emitted when homography is successfully computed
+    
+    def __init__(self, world_width_m=4.80, world_height_m=6.00, grid_cols=8, grid_rows=10, default_zone_radius_m=0.25, parent=None):
+        """
+        Initialize FloorplanView.
+        
+        Args:
+            world_width_m: World width in meters
+            world_height_m: World height in meters
+            grid_cols: Number of grid columns
+            grid_rows: Number of grid rows
+            default_zone_radius_m: Default radius for zones in meters
+            parent: Parent widget
+        """
         super().__init__(parent)
-        global AREA_WIDTH_M, AREA_HEIGHT_M, GRID_COLS, GRID_ROWS, CELL_SIZE_M
-        AREA_WIDTH_M = world_w_m; AREA_HEIGHT_M = world_h_m
-        GRID_COLS = grid_cols; GRID_ROWS = grid_rows
-        CELL_SIZE_M = AREA_WIDTH_M / GRID_COLS
-
-        self.view = _ImageGridView(self)
-        self.info = QLabel("", self); self.info.setWordWrap(True)
-        lay = QVBoxLayout(self); lay.addWidget(self.view); lay.addWidget(self.info)
-        self.view.coord_label = self.info
-        self.view._signal_emit = self._emit_proxy
-
-    def _emit_proxy(self, kind, *args):
-        if kind == "registered": self.zoneRegistered.emit(*args)
-        elif kind == "deregistered": self.zoneDeregistered.emit(*args)
-        elif kind == "moved": self.zoneMoved.emit(*args)
-        elif kind == "mapped": self.pointerMapped.emit(*args)
-
-    def load_image(self, path: str): return self.view.load_image(path)
-    def start_marking_corners(self): self.view.start_marking_corners()
-    def auto_transform(self): return self.view.auto_detect_corners()
-    def toggle_place_zones(self, enable: bool): self.view.toggle_place_zones(enable)
-    def clear_mapping(self): self.view.clear_mapping()
-    def clear_zones(self): self.view.clear_zones()
-
-    def map_pointer(self, x_m, y_m, ts, source="mqtt"):
-        if self.view.H_world_to_img is not None:
-            pt = apply_homography(self.view.H_world_to_img, [[x_m, y_m]])[0]
-            self.view.set_virtual_pointer_pixel(float(pt[0]), float(pt[1]), ts, source)
-        else:
-            self.pointerMapped.emit(x_m, y_m, ts, source)
-
-class _ZoneHitboxItem(QGraphicsEllipseItem):
-    def __init__(self, center_x, center_y, hit_r_px, zone):
-        rect = QRectF(-hit_r_px, -hit_r_px, hit_r_px*2, hit_r_px*2)
-        super().__init__(rect)
-        self.zone = zone
-        self.setAcceptHoverEvents(True)
-        p = QPen(); p.setStyle(Qt.NoPen); self.setPen(p)
-        self.setBrush(QColor(0,0,0,0))
-        self.setZValue(50)
-        self.setFlag(QGraphicsItem.ItemIsMovable, True)
-        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
-        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.setPos(center_x, center_y)
-        self.setCursor(Qt.OpenHandCursor)
-
-    def hoverEnterEvent(self, e):
-        self.zone._on_hover_enter(); super().hoverEnterEvent(e)
-    def hoverLeaveEvent(self, e):
-        self.zone._on_hover_leave(); super().hoverLeaveEvent(e)
-    def mousePressEvent(self, e):
-        self.setCursor(Qt.ClosedHandCursor); super().mousePressEvent(e)
-    def mouseReleaseEvent(self, e):
-        self.setCursor(Qt.OpenHandCursor); super().mouseReleaseEvent(e)
-    def itemChange(self, change, value):
-        if change == QGraphicsItem.ItemPositionHasChanged:
-            pos = value; self.zone._on_moved(pos.x(), pos.y())
-        return super().itemChange(change, value)
-
-class _Zone(QObject):
-    def __init__(self, view, x_px, y_px, radius_m, idx):
-        super().__init__()
-        self.view = view; self.idx = idx
-        self.center = (x_px, y_px); self.radius_m = radius_m
-        r_px = self._m_to_px(radius_m); r_px = max(3.0, r_px)
-        self.radius_px = float(r_px); self.hit_radius_px = float(self.radius_px*1.5)
-        self.hitbox = _ZoneHitboxItem(x_px, y_px, self.hit_radius_px, self)
-        self.visual = QGraphicsEllipseItem(-self.radius_px, -self.radius_px, 2*self.radius_px, 2*self.radius_px, parent=self.hitbox)
-        self.visual.setBrush(QColor(200,200,200,140)); self.visual.setPen(QPen(QColor(80,80,80,160))); self.visual.setZValue(60); self.visual.setOpacity(0.6)
-        h = max(4.0, self.radius_px*0.15)
-        self.handle = QGraphicsEllipseItem(-h, -h, 2*h, 2*h, parent=self.hitbox)
-        self.handle.setBrush(QColor(100,100,255,200)); self.handle.setPen(QPen(QColor(40,40,120,200))); self.handle.setZValue(70); self.handle.setCursor(Qt.OpenHandCursor)
-        self.label = QGraphicsSimpleTextItem(str(idx), parent=self.hitbox); self.label.setPos(self.radius_px+4, -6); self.label.setZValue(61)
-        self.tooltip = QGraphicsSimpleTextItem("", parent=self.hitbox); f = QFont(); f.setPointSize(12); self.tooltip.setFont(f); self.tooltip.setZValue(80); self.tooltip.setVisible(False); self._update_tip_pos()
-        self.registered = False
-        self._reg = QTimer(); self._reg.setSingleShot(True); self._reg.timeout.connect(self._do_register)
-        self._dereg = QTimer(); self._dereg.setSingleShot(True); self._dereg.timeout.connect(self._do_deregister)
-        self._anim = QVariantAnimation(); self._anim.valueChanged.connect(lambda v: self.visual.setOpacity(float(v))); self._anim.setDuration(300)
-
-    def add(self, scene): scene.addItem(self.hitbox)
-    def remove(self, scene): 
-        try: scene.removeItem(self.hitbox)
-        except Exception: pass
-
-    def _m_to_px(self, m):
-        if self.view.H_world_to_img is not None:
-            p0 = apply_homography(self.view.H_world_to_img, [[0.0, 0.0]])[0]
-            p1 = apply_homography(self.view.H_world_to_img, [[m, 0.0]])[0]
-            return math.hypot(float(p1[0])-float(p0[0]), float(p1[1])-float(p0[1]))
-        if self.view.img_w and AREA_WIDTH_M>0: return m * (float(self.view.img_w)/float(AREA_WIDTH_M))
-        return m*100.0
-
-    def _on_hover_enter(self):
-        if self._dereg.isActive(): self._dereg.stop()
-        self._show_tip(True)
-        if self.registered: return
-        if not self._reg.isActive(): self._reg.start(3000)
-
-    def _on_hover_leave(self):
-        QTimer.singleShot(250, lambda: self._show_tip(False))
-        if self._reg.isActive():
-            self._reg.stop(); return
-        if self.registered and not self._dereg.isActive():
-            self._dereg.start(1000)
-
-    def _do_register(self):
-        self.registered = True
-        self._anim.stop(); self._anim.setStartValue(self.visual.opacity()); self._anim.setEndValue(1.0); self._anim.start()
-        self.visual.setBrush(QColor(120,220,120,200))
-        world = self._px_to_m(*self.center)
-        if self.view._signal_emit: self.view._signal_emit("registered", self.idx, world[0], world[1], time.time(), "pointer")
-
-    def _do_deregister(self):
-        self.registered = False
-        self._anim.stop(); self._anim.setStartValue(self.visual.opacity()); self._anim.setEndValue(0.6); self._anim.start()
-        self.visual.setBrush(QColor(200,200,200,140))
-        world = self._px_to_m(*self.center)
-        if self.view._signal_emit: self.view._signal_emit("deregistered", self.idx, world[0], world[1], time.time(), "pointer")
-
-    def _on_moved(self, x_px, y_px):
-        self.center = (float(x_px), float(y_px)); self.label.setPos(self.radius_px+4,-6); self._update_tip_pos()
-        world = self._px_to_m(*self.center)
-        if self.view._signal_emit: self.view._signal_emit("moved", self.idx, world[0], world[1])
-
-    def _px_to_m(self, x_px, y_px):
-        if self.view.H_img_to_world is not None:
-            res = apply_homography(self.view.H_img_to_world, [[x_px, y_px]])[0]
-            return (float(res[0]), float(res[1]))
-        if self.view.img_w and AREA_WIDTH_M>0:
-            ppm = float(self.view.img_w)/float(AREA_WIDTH_M); return (x_px/ppm, y_px/ppm)
-        return (0.0,0.0)
-
-    def _show_tip(self, show):
-        if show:
-            w = self._px_to_m(*self.center)
-            self.tooltip.setText(f"{w[0]:.3f} m, {w[1]:.3f} m"); self.tooltip.setVisible(True)
-        else:
-            self.tooltip.setVisible(False)
-
-    def _update_tip_pos(self):
-        self.tooltip.setPos(-self.tooltip.boundingRect().width()/2, -self.radius_px-16)
-
-class _ImageGridView(QGraphicsView):
-    def __init__(self, host):
-        super().__init__(host)
-        self.host = host
-        self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+        
+        # World dimensions
+        self.world_width_m = world_width_m
+        self.world_height_m = world_height_m
+        self.grid_cols = grid_cols
+        self.grid_rows = grid_rows
+        self.default_zone_radius_m = default_zone_radius_m
+        
+        # Graphics scene
+        self.scene = QGraphicsScene(self)
+        self.setScene(self.scene)
+        
+        # State
+        self.image_item = None
+        self.image_path = None
+        self.homography_matrix = None
+        self._homography_inv = None  # Cached inverse homography
+        self.corners = []  # List of marked corners [(x_px, y_px), ...]
+        self.marking_corners = False
+        
+        # Zones
+        self.zones = []  # List of Zone objects
+        self.next_zone_id = 1
+        self.placing_zones = False
+        
+        # Pointer tracking
+        self.pointer_item = None
+        self.current_pointer_pos = None  # (x_m, y_m)
+        
+        # Grid visualization
+        self.grid_items = []
+        
+        # Speaker visualization (for Adaptive Audio)
+        self.speaker_volumes = {}  # {speaker_id: volume}
+        self.speaker_positions = {}  # {speaker_id: (x_m, y_m)}
+        self.speaker_items = {}  # {speaker_id: {'icon': QGraphicsItem, 'bar_bg': QGraphicsItem, 'bar_fill': QGraphicsItem, 'text': QGraphicsTextItem}}
+        self.show_speakers = False  # Only show in Adaptive Audio widget
+        
+        # Zone registration timers
+        self.current_zone = None
+        self.zone_timer = QTimer()
+        self.zone_timer.timeout.connect(self._check_zone_registration)
+        self.zone_timer.start(100)  # Check every 100ms
+        self.zone_hover_start = None  # QTimer for hover start
+        self.zone_leave_start = None  # QTimer for leave start
+        self.t_register_ms = 3000  # Default registration time
+        self.t_deregister_ms = 1000  # Default deregistration time
+        
+        # View settings
+        self.setRenderHint(QPainter.Antialiasing)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
-        self.scene = QGraphicsScene(self); self.setScene(self.scene)
-
-        self.pix_item = None; self.img_w = 0; self.img_h = 0; self.current_image_path = None
-        self.H_world_to_img = None; self.H_img_to_world = None
-        self.marking = False; self.marked_pts = []; self.grid_overlay=None; self.corner_markers=[]
-        self.zones = []; self.placing_zones = False; self.next_zone_idx=1
-        self._zoom = 0
-        self._signal_emit = None
-
-        self.pointer = QGraphicsEllipseItem(-4, -4, 8, 8)
-        self.pointer.setBrush(QColor(255,0,0,220)); self.pointer.setPen(QPen(Qt.NoPen)); self.pointer.setZValue(200)
-        self.pointer.setVisible(False); self.scene.addItem(self.pointer)
-
-    def load_image(self, filename):
-        pix = QPixmap(filename)
-        if pix.isNull(): return False
-        self.scene.clear()
-        self.scene.addItem(self.pointer); self.pointer.setVisible(False)
-        self.pix_item = QGraphicsPixmapItem(pix); self.pix_item.setZValue(0); self.pix_item.setPos(0,0)
-        self.scene.addItem(self.pix_item)
-
-        self.img_w = pix.width(); self.img_h = pix.height()
-        self.current_image_path = filename
-        self.scene.setSceneRect(0,0,self.img_w,self.img_h)
-
-        self.H_world_to_img = None; self.H_img_to_world=None; self.marked_pts=[]
-        self._remove_corner_markers()
-        if self.grid_overlay: self.scene.removeItem(self.grid_overlay); self.grid_overlay=None
-        self.clear_zones()
-
-        self.fitInView(self.pix_item.boundingRect(), Qt.KeepAspectRatio); self._zoom=0
-        return True
+        self.setBackgroundBrush(QBrush(QColor(245, 245, 245)))
+    
+    def load_image(self, filename: str) -> bool:
+        """
+        Load a floorplan image.
+        
+        Args:
+            filename: Path to image file
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Load image using OpenCV (for homography calculations)
+            self.image_path = filename
+            
+            # Load for Qt display
+            pixmap = QPixmap(filename)
+            if pixmap.isNull():
+                return False
+            
+            # Clear scene
+            self.scene.clear()
+            self.corners = []
+            self.homography_matrix = None
+            self._homography_inv = None  # Clear cached inverse
+            
+            # Add image to scene
+            self.image_item = QGraphicsPixmapItem(pixmap)
+            self.scene.addItem(self.image_item)
+            
+            # Fit in view
+            self.fitInView(self.image_item, Qt.KeepAspectRatio)
+            
+            return True
+        except Exception as e:
+            print(f"[FloorplanView] Error loading image: {e}")
+            return False
 
     def start_marking_corners(self):
-        if not self.pix_item: return
-        self.marking = True; self.marked_pts = []; self._remove_corner_markers()
-        self._hint("Click 4 image points: TL, TR, BR, BL (in order)")
-
-    def set_virtual_pointer_pixel(self, x_px, y_px, ts, source):
-        self.pointer.setVisible(True); self.pointer.setPos(float(x_px), float(y_px))
-        if self._signal_emit and self.H_img_to_world is not None:
-            res = apply_homography(self.H_img_to_world, [[x_px, y_px]])[0]
-            self._signal_emit("mapped", float(res[0]), float(res[1]), ts, source)
+        """Enable corner marking mode."""
+        self.marking_corners = True
+        self.corners = []
+        print("[FloorplanView] Click on 4 corners in order: TL, TR, BR, BL")
+    
+    def auto_detect_corners(self) -> bool:
+        """
+        Automatically detect floorplan corners using computer vision.
+        
+        Uses edge detection and contour finding to locate the floorplan rectangle,
+        then extracts the 4 corner points.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.image_path:
+            print("[FloorplanView] No image loaded. Please load a floorplan image first.")
+            return False
+        
+        try:
+            # Load image with OpenCV
+            img = cv2.imread(self.image_path)
+            if img is None:
+                print(f"[FloorplanView] Failed to load image: {self.image_path}")
+                return False
+            
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            h, w = gray.shape
+            
+            # Method 1: Try to find the largest rectangle contour
+            # Apply edge detection
+            edges = cv2.Canny(gray, 50, 150)
+            
+            # Find contours
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if contours:
+                # Find the largest contour (likely the floorplan boundary)
+                largest_contour = max(contours, key=cv2.contourArea)
+                
+                # Approximate contour to polygon
+                epsilon = 0.02 * cv2.arcLength(largest_contour, True)
+                approx = cv2.approxPolyDP(largest_contour, epsilon, True)
+                
+                # If we found a rectangle (4 points), use it
+                if len(approx) == 4:
+                    # Sort corners: TL, TR, BR, BL
+                    corners = approx.reshape(4, 2)
+                    # Sort by y-coordinate first, then x
+                    corners = corners[corners[:, 1].argsort()]
+                    top = corners[:2][corners[:2, 0].argsort()]
+                    bottom = corners[2:][corners[2:, 0].argsort()]
+                    sorted_corners = [
+                        tuple(top[0]),  # TL
+                        tuple(top[1]),  # TR
+                        tuple(bottom[1]),  # BR
+                        tuple(bottom[0])  # BL
+                    ]
+                    self.corners = sorted_corners
+                    if self._compute_homography():
+                        print(f"[FloorplanView] Auto-detected 4 corners: {self.corners}")
+                        return True
+                    else:
+                        print("[FloorplanView] Failed to compute homography from detected corners.")
+                        return False
+            
+            # Method 2: Fallback - use image corners if contour detection fails
+            print("[FloorplanView] Contour detection failed, using image corners as fallback")
+            self.corners = [
+                (0, 0),  # TL
+                (w, 0),  # TR
+                (w, h),  # BR
+                (0, h)   # BL
+            ]
+            if self._compute_homography():
+                print(f"[FloorplanView] Using image corners: {self.corners}")
+                return True
+            else:
+                print("[FloorplanView] Failed to compute homography from image corners.")
+                return False
+            
+        except Exception as e:
+            print(f"[FloorplanView] Auto-detect failed: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return False
+    
+    def auto_transform(self) -> bool:
+        """Alias for auto_detect_corners (for toolbar compatibility)."""
+        return self.auto_detect_corners()
+    
+    def toggle_place_zones(self, enabled: bool):
+        """Toggle zone placement mode (for toolbar compatibility)."""
+        self.placing_zones = enabled
 
     def clear_mapping(self):
-        self.H_world_to_img = None; self.H_img_to_world=None; self.marked_pts=[]
-        self._remove_corner_markers()
-        if self.grid_overlay: self.scene.removeItem(self.grid_overlay); self.grid_overlay=None
-        self.clear_zones()
-
-    def toggle_place_zones(self, enable: bool):
-        self.placing_zones = bool(enable)
-        if self.placing_zones: self._hint("Zone placement mode: click to place zones.")
-        else: self._hint("Exited zone placement.")
+        """Clear homography mapping and corners."""
+        self.corners = []
+        self.homography_matrix = None
+        self._homography_inv = None  # Clear cached inverse
+        # Clear grid
+        for item in self.grid_items:
+            self.scene.removeItem(item)
+        self.grid_items = []
+        print("[FloorplanView] Mapping cleared")
+    
+    def _compute_homography(self):
+        """Compute homography matrix from marked corners.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        if len(self.corners) != 4:
+            return False
+        
+        # World coordinates for corners (TL, TR, BR, BL) in meters
+        world_corners = np.array([
+            [0.0, 0.0],  # Top-left
+            [self.world_width_m, 0.0],  # Top-right
+            [self.world_width_m, self.world_height_m],  # Bottom-right
+            [0.0, self.world_height_m]  # Bottom-left
+        ], dtype=np.float32)
+        
+        # Image corners in pixels
+        image_corners = np.array(self.corners, dtype=np.float32)
+        
+        # Compute homography
+        try:
+            self.homography_matrix, _ = cv2.findHomography(world_corners, image_corners)
+            if self.homography_matrix is not None:
+                print(f"[FloorplanView] Homography computed successfully")
+                # Clear cached inverse homography
+                self._homography_inv = None
+                # Draw grid
+                self._draw_grid()
+                # Redraw all zones with new homography (to update their sizes)
+                # Use QTimer.singleShot to avoid blocking the UI thread
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(0, self.redraw_all_zones)
+                # Emit signal that homography is ready
+                self.homographyComputed.emit()
+                return True
+            else:
+                print("[FloorplanView] Failed to compute homography matrix")
+                return False
+        except Exception as e:
+            print(f"[FloorplanView] Error computing homography: {e}")
+            return False
+    
+    def _draw_grid(self):
+        """Draw perspective-correct grid on floorplan."""
+        if self.homography_matrix is None:
+            return
+        
+        # Clear existing grid
+        for item in self.grid_items:
+            self.scene.removeItem(item)
+        self.grid_items = []
+        
+        pen = QPen(QColor(100, 100, 100, 128))
+        pen.setWidth(1)
+        
+        cell_width = self.world_width_m / self.grid_cols
+        cell_height = self.world_height_m / self.grid_rows
+        
+        # Draw vertical lines
+        for i in range(self.grid_cols + 1):
+            x_world = i * cell_width
+            
+            # Map top and bottom points
+            top_world = np.array([[x_world, 0.0]], dtype=np.float32).reshape(-1, 1, 2)
+            bottom_world = np.array([[x_world, self.world_height_m]], dtype=np.float32).reshape(-1, 1, 2)
+            
+            top_img = cv2.perspectiveTransform(top_world, self.homography_matrix)[0][0]
+            bottom_img = cv2.perspectiveTransform(bottom_world, self.homography_matrix)[0][0]
+            
+            line = QGraphicsLineItem(top_img[0], top_img[1], bottom_img[0], bottom_img[1])
+            line.setPen(pen)
+            self.scene.addItem(line)
+            self.grid_items.append(line)
+        
+        # Draw horizontal lines
+        for j in range(self.grid_rows + 1):
+            y_world = j * cell_height
+            
+            # Map left and right points
+            left_world = np.array([[0.0, y_world]], dtype=np.float32).reshape(-1, 1, 2)
+            right_world = np.array([[self.world_width_m, y_world]], dtype=np.float32).reshape(-1, 1, 2)
+            
+            left_img = cv2.perspectiveTransform(left_world, self.homography_matrix)[0][0]
+            right_img = cv2.perspectiveTransform(right_world, self.homography_matrix)[0][0]
+            
+            line = QGraphicsLineItem(left_img[0], left_img[1], right_img[0], right_img[1])
+            line.setPen(pen)
+            self.scene.addItem(line)
+            self.grid_items.append(line)
+    
+    def pixel_to_meter(self, x_px: float, y_px: float):
+        """
+        Convert pixel coordinates to world coordinates (meters).
+        
+        Args:
+            x_px: X coordinate in pixels
+            y_px: Y coordinate in pixels
+            
+        Returns:
+            tuple: (x_m, y_m) in meters, or None if homography not available
+        """
+        if self.homography_matrix is None:
+            return None
+        
+        try:
+            # Transform image → world using inverse homography
+            image_point = np.array([[x_px, y_px]], dtype=np.float32).reshape(-1, 1, 2)
+            # Cache inverse homography to avoid repeated computation
+            if not hasattr(self, '_homography_inv') or self._homography_inv is None:
+                # Check if matrix is invertible
+                det = np.linalg.det(self.homography_matrix)
+                if abs(det) < 1e-6:
+                    print(f"[FloorplanView] Warning: Homography matrix is near-singular (det={det})")
+                    return None
+                self._homography_inv = np.linalg.inv(self.homography_matrix)
+            world_point = cv2.perspectiveTransform(image_point, self._homography_inv)[0][0]
+            return (world_point[0], world_point[1])
+        except np.linalg.LinAlgError as e:
+            print(f"[FloorplanView] Error inverting homography matrix: {e}")
+            self._homography_inv = None  # Clear cache
+            return None
+        except Exception as e:
+            print(f"[FloorplanView] Error converting pixel to meter: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def meter_to_pixel(self, x_m: float, y_m: float):
+        """
+        Convert world coordinates (meters) to pixel coordinates.
+        
+        Args:
+            x_m: X coordinate in meters
+            y_m: Y coordinate in meters
+            
+        Returns:
+            tuple: (x_px, y_px) in pixels, or None if homography not available
+        """
+        if self.homography_matrix is None:
+            return None
+        
+        try:
+            # Transform world → image
+            world_point = np.array([[x_m, y_m]], dtype=np.float32).reshape(-1, 1, 2)
+            image_point = cv2.perspectiveTransform(world_point, self.homography_matrix)[0][0]
+            return (image_point[0], image_point[1])
+        except Exception as e:
+            print(f"[FloorplanView] Error converting meter to pixel: {e}")
+            return None
+    
+    def map_pointer(self, x_m: float, y_m: float):
+        """
+        Map world coordinates to image and visualize pointer.
+        
+        Args:
+            x_m: X coordinate in meters
+            y_m: Y coordinate in meters
+        """
+        if self.homography_matrix is None:
+            return
+        
+        # Store current position
+        self.current_pointer_pos = (x_m, y_m)
+        
+        # Transform world → image
+        pixel_coords = self.meter_to_pixel(x_m, y_m)
+        if pixel_coords is None:
+            return
+        
+        image_point = pixel_coords
+        
+        # Draw pointer
+        if self.pointer_item is None:
+            self.pointer_item = QGraphicsEllipseItem(0, 0, 16, 16)
+            self.pointer_item.setBrush(QBrush(QColor(255, 0, 0, 200)))
+            self.pointer_item.setPen(QPen(Qt.NoPen))
+            self.scene.addItem(self.pointer_item)
+        
+        # Update position (center the circle)
+        self.pointer_item.setPos(image_point[0] - 8, image_point[1] - 8)
+        
+        # Update zone colors based on new pointer position
+        self._update_zone_colors_for_pointer()
+        
+        # Emit signal for status bar update (meters -> pixels)
+        self.pixelToMeterMapped.emit(image_point[0], image_point[1], x_m, y_m)
+    
+    def place_zone(self, x_m: float, y_m: float, radius_m: float = None):
+        """
+        Place a zone at world coordinates.
+        
+        Args:
+            x_m: X coordinate in meters
+            y_m: Y coordinate in meters
+            radius_m: Zone radius in meters (defaults to self.default_zone_radius_m)
+            
+        Returns:
+            Zone object
+        """
+        if radius_m is None:
+            radius_m = self.default_zone_radius_m
+        zone = Zone(self.next_zone_id, x_m, y_m, radius_m)
+        self.next_zone_id += 1
+        self.zones.append(zone)
+        
+        # Visualize zone
+        self._draw_zone(zone)
+        
+        return zone
+    
+    def place_rectangular_zone(self, x1_m: float, y1_m: float, x2_m: float, y2_m: float, zone_id=None):
+        """
+        Place a rectangular zone spanning from (x1_m, y1_m) to (x2_m, y2_m).
+        
+        Args:
+            x1_m: Top-left X coordinate in meters
+            y1_m: Top-left Y coordinate in meters
+            x2_m: Bottom-right X coordinate in meters
+            y2_m: Bottom-right Y coordinate in meters
+            zone_id: Optional zone ID (string or int). If None, uses next_zone_id.
+            
+        Returns:
+            RectangularZone object
+        """
+        if zone_id is None:
+            zone_id = self.next_zone_id
+            self.next_zone_id += 1
+        
+        # Create rectangular zone
+        rect_zone = RectangularZone(zone_id, x1_m, y1_m, x2_m, y2_m)
+        self.zones.append(rect_zone)
+        self._draw_rectangular_zone(rect_zone)
+        return rect_zone
+    
+    def _calculate_zone_radius_px(self, x_m: float, y_m: float, radius_m: float) -> float:
+        """
+        Calculate zone radius in pixels based on homography transformation.
+        
+        Accounts for perspective distortion by sampling points around the circle
+        and calculating the average radius in pixel space.
+        
+        Args:
+            x_m: Zone center X in meters
+            y_m: Zone center Y in meters
+            radius_m: Zone radius in meters
+            
+        Returns:
+            Radius in pixels, or None if homography not available
+        """
+        if self.homography_matrix is None:
+            return None
+        
+        try:
+            # Transform zone center to pixel coordinates
+            center_world = np.array([[x_m, y_m]], dtype=np.float32).reshape(-1, 1, 2)
+            center_px = cv2.perspectiveTransform(center_world, self.homography_matrix)[0][0]
+            
+            # Sample points around the circle in world space (4 points for faster computation)
+            # This accounts for perspective distortion while being more efficient
+            num_samples = 4  # Reduced from 8 to 4 for better performance
+            radii_px = []
+            
+            for i in range(num_samples):
+                angle = 2 * np.pi * i / num_samples
+                # Point on circle circumference in world space
+                sample_x = x_m + radius_m * np.cos(angle)
+                sample_y = y_m + radius_m * np.sin(angle)
+                
+                # Transform to pixel coordinates
+                sample_world = np.array([[sample_x, sample_y]], dtype=np.float32).reshape(-1, 1, 2)
+                sample_px = cv2.perspectiveTransform(sample_world, self.homography_matrix)[0][0]
+                
+                # Calculate distance from center to sample point in pixel space
+                dist_px = np.sqrt((sample_px[0] - center_px[0])**2 + (sample_px[1] - center_px[1])**2)
+                radii_px.append(dist_px)
+            
+            # Use average radius (more stable than min/max for perspective correction)
+            if radii_px:
+                avg_radius_px = np.mean(radii_px)
+                return float(avg_radius_px)
+            else:
+                return None
+            
+        except Exception as e:
+            print(f"[FloorplanView] Error calculating zone radius: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _draw_zone(self, zone: Zone):
+        """Draw zone on floorplan with perspective-correct radius scaling."""
+        if self.homography_matrix is None:
+            return
+        
+        # Transform zone center to image coordinates
+        center_px = self.meter_to_pixel(zone.x, zone.y)
+        if center_px is None:
+            return
+        
+        # Calculate radius in pixels using homography (accounts for perspective)
+        radius_px = self._calculate_zone_radius_px(zone.x, zone.y, zone.radius)
+        if radius_px is None or radius_px <= 0:
+            # Fallback to simple approximation if calculation fails
+            # Estimate scale from world dimensions to image size
+            if self.image_item:
+                img_width = self.image_item.pixmap().width()
+                img_height = self.image_item.pixmap().height()
+                # Rough estimate: assume image covers world area
+                scale_x = img_width / self.world_width_m
+                scale_y = img_height / self.world_height_m
+                scale = (scale_x + scale_y) / 2.0
+                radius_px = zone.radius * scale
+            else:
+                radius_px = zone.radius * 50  # Last resort fallback
+        
+        # Create circle
+        zone.graphics_item = QGraphicsEllipseItem(
+            center_px[0] - radius_px,
+            center_px[1] - radius_px,
+            radius_px * 2,
+            radius_px * 2
+        )
+        
+        # Set color based on zone state and pointer position
+        # Green tint only when pointer is in zone area, otherwise light translucent box
+        pointer_in_zone = False
+        if self.current_pointer_pos is not None:
+            x_m, y_m = self.current_pointer_pos
+            pointer_in_zone = zone.contains(x_m, y_m)
+        
+        if zone.is_active:
+            # Green tint when registered (translucent)
+            zone.graphics_item.setPen(QPen(QColor(0, 200, 0, 200), 3))
+            zone.graphics_item.setBrush(QBrush(QColor(0, 200, 0, 80)))  # Translucent green
+        elif pointer_in_zone:
+            # Green tint when pointer is in zone (but not yet registered)
+            zone.graphics_item.setPen(QPen(QColor(100, 200, 100, 150), 2))  # Light green border
+            zone.graphics_item.setBrush(QBrush(QColor(150, 220, 150, 60)))  # Translucent light green
+        else:
+            # Light translucent/transparent box when pointer is not in zone
+            zone.graphics_item.setPen(QPen(QColor(200, 200, 200, 80), 2))  # Light gray border
+            zone.graphics_item.setBrush(QBrush(QColor(240, 240, 240, 30)))  # Very translucent white/gray
+        
+        self.scene.addItem(zone.graphics_item)
+    
+    def _draw_rectangular_zone(self, zone: RectangularZone):
+        """Draw rectangular zone on floorplan with perspective-correct scaling."""
+        if self.homography_matrix is None:
+            return
+        
+        # Transform rectangle corners to pixel coordinates
+        corners_world = np.array([
+            [zone.x1, zone.y1],  # Top-left
+            [zone.x2, zone.y1],  # Top-right
+            [zone.x2, zone.y2],  # Bottom-right
+            [zone.x1, zone.y2]   # Bottom-left
+        ], dtype=np.float32).reshape(-1, 1, 2)
+        
+        try:
+            corners_px = cv2.perspectiveTransform(corners_world, self.homography_matrix)
+            
+            # Find bounding box in pixel space
+            x_coords = [pt[0][0] for pt in corners_px]
+            y_coords = [pt[0][1] for pt in corners_px]
+            min_x = min(x_coords)
+            max_x = max(x_coords)
+            min_y = min(y_coords)
+            max_y = max(y_coords)
+            
+            # Create rectangle
+            zone.graphics_item = QGraphicsRectItem(min_x, min_y, max_x - min_x, max_y - min_y)
+            
+            # Set color based on zone state and pointer position
+            # For rectangular zones (Adaptive Audio): green tint only when pointer is in zone
+            pointer_in_zone = False
+            if self.current_pointer_pos is not None:
+                x_m, y_m = self.current_pointer_pos
+                pointer_in_zone = zone.contains(x_m, y_m)
+            
+            if zone.is_active:
+                # Brighter green when registered (translucent)
+                zone.graphics_item.setPen(QPen(QColor(0, 200, 0, 200), 3))
+                zone.graphics_item.setBrush(QBrush(QColor(0, 200, 0, 80)))  # Translucent green
+            elif pointer_in_zone:
+                # Green tint when pointer is in zone (but not yet registered)
+                zone.graphics_item.setPen(QPen(QColor(100, 200, 100, 150), 2))  # Light green border
+                zone.graphics_item.setBrush(QBrush(QColor(150, 220, 150, 60)))  # Translucent light green
+            else:
+                # Light translucent/transparent box when pointer is not in zone
+                zone.graphics_item.setPen(QPen(QColor(200, 200, 200, 80), 2))  # Light gray border
+                zone.graphics_item.setBrush(QBrush(QColor(240, 240, 240, 30)))  # Very translucent white/gray
+            
+            self.scene.addItem(zone.graphics_item)
+        except Exception as e:
+            print(f"[FloorplanView] Error drawing rectangular zone: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _update_zone_colors_for_pointer(self):
+        """Update zone colors based on current pointer position."""
+        if self.current_pointer_pos is None:
+            return
+        
+        x_m, y_m = self.current_pointer_pos
+        
+        # Update all zones that are not active (active zones keep their green color)
+        for zone in self.zones:
+            if zone.is_active:
+                continue  # Skip active zones, they keep their registered green color
+            
+            # Check if pointer is in zone
+            pointer_in_zone = zone.contains(x_m, y_m)
+            
+            # Only update if graphics item exists
+            if zone.graphics_item is None:
+                continue
+            
+            # Determine new colors based on pointer position
+            if pointer_in_zone:
+                # Green tint when pointer is in zone
+                new_pen = QPen(QColor(100, 200, 100, 150), 2)
+                new_brush = QBrush(QColor(150, 220, 150, 60))
+            else:
+                # Light translucent box when pointer is not in zone
+                new_pen = QPen(QColor(200, 200, 200, 80), 2)
+                new_brush = QBrush(QColor(240, 240, 240, 30))
+            
+            # Update colors
+            zone.graphics_item.setPen(new_pen)
+            zone.graphics_item.setBrush(new_brush)
+    
+    def set_speaker_volumes(self, volumes: dict):
+        """
+        Update speaker volumes for visualization.
+        
+        Args:
+            volumes: Dict mapping speaker_id (0-3) to volume (0-100)
+        """
+        self.speaker_volumes = volumes.copy()
+        if self.show_speakers:
+            self._update_speaker_visualization()
+    
+    def set_speaker_positions(self, positions: dict):
+        """
+        Set speaker positions in world coordinates (meters).
+        Speakers are located at anchor positions (corners).
+        
+        Args:
+            positions: Dict mapping speaker_id (0-3) to position [x_m, y_m, z_m]
+        """
+        self.speaker_positions = {}
+        for speaker_id, pos in positions.items():
+            # Store only x, y (ignore z)
+            self.speaker_positions[speaker_id] = (float(pos[0]), float(pos[1]))
+        if self.show_speakers:
+            self._update_speaker_visualization()
+    
+    def set_show_speakers(self, show: bool):
+        """Enable/disable speaker visualization."""
+        self.show_speakers = show
+        if not show:
+            # Remove all speaker items
+            for speaker_id, items in list(self.speaker_items.items()):
+                for item in items.values():
+                    if item:
+                        self.scene.removeItem(item)
+            self.speaker_items = {}
+        else:
+            # Redraw speakers
+            self._update_speaker_visualization()
+    
+    def _update_speaker_visualization(self):
+        """Update speaker icons, volume bars, and volume numbers on floorplan."""
+        if self.homography_matrix is None:
+            return
+        
+        # Remove old speaker items
+        for speaker_id, items in list(self.speaker_items.items()):
+            for item in items.values():
+                if item:
+                    self.scene.removeItem(item)
+        self.speaker_items = {}
+        
+        # Draw speakers at corner positions
+        for speaker_id in range(4):  # Speakers 0-3
+            if speaker_id not in self.speaker_positions:
+                continue
+            
+            x_m, y_m = self.speaker_positions[speaker_id]
+            volume = self.speaker_volumes.get(speaker_id, 0)
+            
+            # Convert to pixel coordinates
+            pixel_pos = self.meter_to_pixel(x_m, y_m)
+            if pixel_pos is None:
+                continue
+            
+            px, py = pixel_pos
+            
+            # Create speaker icon (circle)
+            icon_size = 24
+            icon = QGraphicsEllipseItem(px - icon_size/2, py - icon_size/2, icon_size, icon_size)
+            icon.setPen(QPen(QColor(0, 0, 0), 2))
+            icon.setBrush(QBrush(QColor(100, 150, 200, 200)))  # Light blue
+            self.scene.addItem(icon)
+            
+            # Create volume bar (vertical bar next to icon)
+            bar_width = 8
+            bar_height = 60
+            bar_x = px + icon_size/2 + 5
+            bar_y = py - bar_height/2
+            
+            # Background bar (gray)
+            bar_bg = QGraphicsRectItem(bar_x, bar_y, bar_width, bar_height)
+            bar_bg.setPen(QPen(QColor(200, 200, 200), 1))
+            bar_bg.setBrush(QBrush(QColor(240, 240, 240)))
+            self.scene.addItem(bar_bg)
+            
+            # Volume fill (green, height based on volume)
+            fill_height = (volume / 100.0) * bar_height
+            fill_y = bar_y + (bar_height - fill_height)
+            bar_fill = QGraphicsRectItem(bar_x, fill_y, bar_width, fill_height)
+            bar_fill.setPen(QPen(Qt.NoPen))
+            bar_fill.setBrush(QBrush(QColor(0, 200, 0, 200)))  # Green
+            self.scene.addItem(bar_fill)
+            
+            # Volume text (percentage)
+            volume_text = QGraphicsTextItem(f"{volume}%")
+            volume_text.setDefaultTextColor(QColor(0, 0, 0))
+            font = QFont("Arial", 9)
+            volume_text.setFont(font)
+            text_rect = volume_text.boundingRect()
+            volume_text.setPos(bar_x + bar_width + 3, py - text_rect.height()/2)
+            self.scene.addItem(volume_text)
+            
+            # Store items for cleanup
+            self.speaker_items[speaker_id] = {
+                'icon': icon,
+                'bar_bg': bar_bg,
+                'bar_fill': bar_fill,
+                'text': volume_text
+            }
+    
+    def update_zone_radius(self, zone: Zone, new_radius_m: float):
+        """
+        Update zone radius and redraw with correct scaling.
+        
+        Args:
+            zone: Zone object to update
+            new_radius_m: New radius in meters
+        """
+        zone.radius = new_radius_m
+        # Redraw zone with new radius
+        if zone.graphics_item:
+            self.scene.removeItem(zone.graphics_item)
+            zone.graphics_item = None
+        self._draw_zone(zone)
+    
+    def redraw_all_zones(self):
+        """Redraw all zones (useful after homography changes or radius updates)."""
+        for zone in self.zones:
+            if zone.graphics_item:
+                self.scene.removeItem(zone.graphics_item)
+                zone.graphics_item = None
+            # Draw based on zone type
+            if isinstance(zone, RectangularZone):
+                self._draw_rectangular_zone(zone)
+            else:
+                self._draw_zone(zone)
 
     def clear_zones(self):
-        for z in self.zones:
-            try:
-                if z._reg.isActive(): z._reg.stop()
-                if z._dereg.isActive(): z._dereg.stop()
-                if z._anim.isRunning(): z._anim.stop()
-            except Exception: pass
-            z.remove(self.scene)
-        self.zones=[]; self.next_zone_idx=1
+        """Remove all zones."""
+        for zone in self.zones:
+            if zone.graphics_item:
+                self.scene.removeItem(zone.graphics_item)
+        self.zones = []
+        self.next_zone_id = 1
+        self.current_zone = None
+    
+    def _check_zone_registration(self):
+        """Check zone hover/leave timers."""
+        if self.current_pointer_pos is None:
+            return
+        
+        x_m, y_m = self.current_pointer_pos
+        
+        # Find zone containing pointer (skip zones that have auto-registration disabled)
+        zone_found = None
+        for zone in self.zones:
+            # Skip zones that have auto-registration disabled (e.g., Adaptive Audio zones)
+            if hasattr(zone, '_skip_auto_registration') and zone._skip_auto_registration:
+                continue
+            if zone.contains(x_m, y_m):
+                zone_found = zone
+                break
+        
+        # Zone registration logic
+        if zone_found and not zone_found.is_active:
+            # Entering zone - start timer if not already started
+            if self.zone_hover_start is None:
+                self.zone_hover_start = QTimer()
+                self.zone_hover_start.setSingleShot(True)
+                # Use a closure to capture the zone
+                def register_zone():
+                    self._register_zone(zone_found)
+                self.zone_hover_start.timeout.connect(register_zone)
+                self.zone_hover_start.start(self.t_register_ms)
+            # Cancel leave timer if we're back in a zone
+            if self.zone_leave_start is not None:
+                self.zone_leave_start.stop()
+                self.zone_leave_start = None
+        elif zone_found and zone_found.is_active:
+            # Still in zone - cancel any leave timer
+            if self.zone_leave_start is not None:
+                self.zone_leave_start.stop()
+                self.zone_leave_start = None
+        elif self.current_zone and self.current_zone.is_active:
+            # Leaving zone - start leave timer if not already started
+            if self.zone_leave_start is None:
+                self.zone_leave_start = QTimer()
+                self.zone_leave_start.setSingleShot(True)
+                # Use a closure to capture the current zone
+                current_zone_ref = self.current_zone
+                def deregister_zone():
+                    if current_zone_ref:
+                        self._deregister_zone(current_zone_ref)
+                self.zone_leave_start.timeout.connect(deregister_zone)
+                self.zone_leave_start.start(self.t_deregister_ms)
+            # Cancel hover timer since we're leaving
+            if self.zone_hover_start is not None:
+                self.zone_hover_start.stop()
+                self.zone_hover_start = None
+        else:
+            # Not in any zone - cancel all timers
+            if self.zone_hover_start is not None:
+                self.zone_hover_start.stop()
+                self.zone_hover_start = None
+            if self.zone_leave_start is not None:
+                self.zone_leave_start.stop()
+                self.zone_leave_start = None
+    
+    def _register_zone(self, zone):
+        """Register zone (user entered and stayed)."""
+        zone.is_active = True
+        self.current_zone = zone
+        
+        # Update visualization (redraw to update colors and ensure correct size)
+        if zone.graphics_item:
+            self.scene.removeItem(zone.graphics_item)
+            zone.graphics_item = None
+        # Draw based on zone type
+        if isinstance(zone, RectangularZone):
+            self._draw_rectangular_zone(zone)
+        else:
+            self._draw_zone(zone)
+        
+        self.zoneRegistered.emit(zone)
+    
+    def _deregister_zone(self, zone):
+        """Deregister zone (user left)."""
+        zone.is_active = False
+        
+        # Update visualization (redraw to update colors and ensure correct size)
+        if zone.graphics_item:
+            self.scene.removeItem(zone.graphics_item)
+            zone.graphics_item = None
+        # Draw based on zone type
+        if isinstance(zone, RectangularZone):
+            self._draw_rectangular_zone(zone)
+        else:
+            self._draw_zone(zone)
+        
+        self.zoneDeregistered.emit(zone)
+        self.current_zone = None
 
     def mousePressEvent(self, event):
-        if event.button()==Qt.LeftButton:
-            pt = self.mapToScene(event.pos()); x=float(pt.x()); y=float(pt.y())
-            if not (0<=x<self.img_w and 0<=y<self.img_h): return super().mousePressEvent(event)
-            if self.placing_zones:
-                z = _Zone(self, x, y, 0.25, self.next_zone_idx); z.add(self.scene); self.zones.append(z); self.next_zone_idx += 1
-                self._hint(f"Placed zone #{z.idx}"); return
-            if self.marking:
-                self.marked_pts.append((x, y)); self._add_corner_marker(x, y, len(self.marked_pts))
-                if len(self.marked_pts)==4:
-                    self.marking=False; self._compute_homography_from_marked()
-                else:
-                    self._hint(f"Marked corner {len(self.marked_pts)}/4")
-                return
-        return super().mousePressEvent(event)
-
-    def wheelEvent(self, event):
-        zf = 1.25; factor = zf if event.angleDelta().y()>0 else 1/zf
-        self._zoom += (1 if factor>1 else -1)
-        if self._zoom>30 or self._zoom<-15: return
-        self.scale(factor, factor)
-
-    def _remove_corner_markers(self):
-        for m in getattr(self, "corner_markers", []):
-            try: self.scene.removeItem(m)
-            except Exception: pass
-        self.corner_markers=[]
-
-    def _add_corner_marker(self, x, y, idx):
-        r=6; ell = QGraphicsEllipseItem(x-r, y-r, r*2, r*2)
-        color = QColor(20,160,20) if idx==1 else QColor(160,20,20) if idx==3 else QColor(20,20,160)
-        pen = QPen(QColor(0,0,0)); ell.setBrush(color); ell.setPen(pen); ell.setZValue(120)
-        lbl = QGraphicsSimpleTextItem(str(idx)); lbl.setPos(x+6, y-6); lbl.setZValue(121)
-        self.scene.addItem(ell); self.scene.addItem(lbl)
-        self.corner_markers += [ell, lbl]
-
-    def _compute_homography_from_marked(self):
-        if len(self.marked_pts)!=4: return
-        img_pts_ordered = order_quad_points(np.array(self.marked_pts, dtype=np.float64))
-        def dist(a,b): return math.hypot(float(a[0])-float(b[0]), float(a[1])-float(b[1]))
-        edges=[dist(img_pts_ordered[0],img_pts_ordered[1]),dist(img_pts_ordered[1],img_pts_ordered[2]),dist(img_pts_ordered[2],img_pts_ordered[3]),dist(img_pts_ordered[3],img_pts_ordered[0])]
-        k=int(np.argmax(edges)); idxs=[(k+i)%4 for i in range(4)]; img_pts_rot = img_pts_ordered[idxs]
-        img_pts_rot[:,0]=np.clip(img_pts_rot[:,0],0,max(0,self.img_w-1)); img_pts_rot[:,1]=np.clip(img_pts_rot[:,1],0,max(0,self.img_h-1))
-        world_pts = np.array([[0.0,0.0],[AREA_WIDTH_M,0.0],[AREA_WIDTH_M,AREA_HEIGHT_M],[0.0,AREA_HEIGHT_M]], dtype=np.float32)
-        H = cv2.getPerspectiveTransform(world_pts.astype(np.float32), img_pts_rot.astype(np.float32))
-        H = H.astype(np.float64); H_inv = np.linalg.inv(H)
-        self.H_world_to_img = H; self.H_img_to_world = H_inv
-        self.marked_pts = [(float(x), float(y)) for (x,y) in img_pts_rot]
-        self._remove_corner_markers()
-        for i,(x,y) in enumerate(self.marked_pts, start=1): self._add_corner_marker(x,y,i)
-        if self.grid_overlay: self.scene.removeItem(self.grid_overlay); self.grid_overlay=None
-        self.grid_overlay = ProjectedGridItem(self.scene.sceneRect(), H_world_to_img=H); self.scene.addItem(self.grid_overlay)
-        self._hint("Homography computed and grid projected.")
-
-    def auto_detect_corners(self, debug=True):
-        if not self.pix_item: self._hint("Load an image first"); return False
-        img_cv = cv2.imread(self.current_image_path) if self.current_image_path else None
-        if img_cv is None:
-            qimg = self.pix_item.pixmap().toImage().convertToFormat(QImage.Format.Format_RGBA8888)
-            w=qimg.width(); h=qimg.height(); ptr=qimg.bits(); ptr.setsize(qimg.byteCount())
-            arr=np.frombuffer(ptr, np.uint8).reshape((h,w,4)); img_cv=cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
-
-        img_h, img_w = img_cv.shape[:2]; gray=cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-        try:
-            clahe=cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)); gray_eq=clahe.apply(gray)
-        except Exception: gray_eq=gray.copy()
-        blur=cv2.GaussianBlur(gray_eq,(5,5),0)
-        v=np.median(blur); sigma=0.33; lower=int(max(0,(1.0-sigma)*v)); upper=int(min(255,(1.0+sigma)*v))
-        if lower>=upper: lower=max(0,int(v*0.5)); upper=min(255,int(v*1.5))
-        edges=cv2.Canny(blur, lower, upper)
-        kernel=cv2.getStructuringElement(cv2.MORPH_RECT,(5,5))
-        edges=cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2); edges=cv2.dilate(edges, kernel, iterations=1)
-        contours,_=cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours: self._hint("No contours found"); return False
-        img_area=float(img_w*img_h); contours=sorted(contours, key=cv2.contourArea, reverse=True)
-        cand=[]
-        for cnt in contours[:200]:
-            area=cv2.contourArea(cnt)
-            if area<img_area*0.002: continue
-            peri=cv2.arcLength(cnt,True)
-            for eps in (0.02,0.015,0.025,0.03):
-                approx=cv2.approxPolyDP(cnt, eps*peri, True)
-                if len(approx)==4 and cv2.isContourConvex(approx):
-                    pts=approx.reshape(4,2).astype(np.float32)
-                    rect=cv2.minAreaRect(pts); box=cv2.boxPoints(rect); box_area=abs(cv2.contourArea(box))+1e-9
-                    rect_ratio=float(area)/float(box_area); score=float(area)*(rect_ratio**2)
-                    cand.append((score, pts)); break
-        if not cand:
-            self._hint("Auto-transform failed"); return False
-        cand.sort(key=lambda x:x[0], reverse=True); chosen=cand[0][1]
-        ordered=order_quad_points(chosen); ordered[:,0]=np.clip(ordered[:,0],0,img_w-1); ordered[:,1]=np.clip(ordered[:,1],0,img_h-1)
-        self.marked_pts=[(float(x),float(y)) for (x,y) in ordered]
-        self._remove_corner_markers()
-        for i,(x,y) in enumerate(self.marked_pts, start=1): self._add_corner_marker(x,y,i)
-        self._compute_homography_from_marked(); self._hint("Auto-transform succeeded"); return True
-
-    def _hint(self, text):
-        if getattr(self.host, "info", None): self.host.info.setText(text)
-        if self.window(): self.window().statusBar().showMessage(text, 4000)
+        """Handle mouse clicks for corner marking and zone placement."""
+        if event.button() == Qt.LeftButton:
+            # Map view coordinates to scene coordinates
+            scene_pos = self.mapToScene(event.pos())
+            x_px = scene_pos.x()
+            y_px = scene_pos.y()
+            
+            if self.marking_corners and len(self.corners) < 4:
+                # Mark corner
+                self.corners.append((x_px, y_px))
+                print(f"[FloorplanView] Corner {len(self.corners)} marked at ({x_px:.1f}, {y_px:.1f})")
+                
+                # Draw marker
+                marker = QGraphicsEllipseItem(x_px - 5, y_px - 5, 10, 10)
+                marker.setBrush(QBrush(QColor(255, 0, 0)))
+                self.scene.addItem(marker)
+                
+                if len(self.corners) == 4:
+                    self.marking_corners = False
+                    self._compute_homography()
+                    print("[FloorplanView] All corners marked, homography computed")
+            
+            elif self.placing_zones and self.homography_matrix is not None:
+                # Place zone - convert image coordinates back to world
+                try:
+                    meter_coords = self.pixel_to_meter(x_px, y_px)
+                    if meter_coords:
+                        zone = self.place_zone(meter_coords[0], meter_coords[1])
+                        print(f"[FloorplanView] Zone {zone.id} placed at ({meter_coords[0]:.2f}m, {meter_coords[1]:.2f}m)")
+                        # Emit pixel-to-meter mapping for status bar (reuse already calculated coords)
+                        self.pixelToMeterMapped.emit(x_px, y_px, meter_coords[0], meter_coords[1])
+                    else:
+                        print(f"[FloorplanView] Warning: Could not convert pixel to meter coordinates")
+                except Exception as e:
+                    print(f"[FloorplanView] Error placing zone: {e}")
+                    import traceback
+                    traceback.print_exc()
+            elif self.homography_matrix is not None and not self.marking_corners:
+                # Emit pixel-to-meter mapping for status bar display (only if not placing zones)
+                meter_coords = self.pixel_to_meter(x_px, y_px)
+                if meter_coords:
+                    self.pixelToMeterMapped.emit(x_px, y_px, meter_coords[0], meter_coords[1])
+        
+        super().mousePressEvent(event)
