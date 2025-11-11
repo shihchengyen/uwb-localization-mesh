@@ -13,6 +13,8 @@ Logic:
   - Move left  → increase RIGHT speaker volume, decrease LEFT speaker volume
   - Move right → increase LEFT speaker volume, decrease RIGHT speaker volume
 
+to run: uv run packages/audio_mqtt_server/adaptive_audio_controller.py --broker 192.168.68.65
+
 """
 
 import json
@@ -237,7 +239,15 @@ class AdaptiveAudioController:
         """Print current status."""
         vols = self.volumes
         pair = self.current_pair or "unknown"
-        line = f"Pair:{pair:>5} | Vols -> R0:{vols[0]:3d}  R1:{vols[1]:3d}  R2:{vols[2]:3d}  R3:{vols[3]:3d}"
+        
+        # Get user coordinates
+        if self._last_position is not None:
+            x, y, z = self._last_position[0], self._last_position[1], self._last_position[2]
+            coords_str = f"Pos:({x:6.1f},{y:6.1f},{z:6.1f})"
+        else:
+            coords_str = "Pos:(  N/A,  N/A,  N/A)"
+        
+        line = f"{coords_str} | Pair:{pair:>5} | Vols -> R0:{vols[0]:3d}  R1:{vols[1]:3d}  R2:{vols[2]:3d}  R3:{vols[3]:3d}"
         print(f"\r{line}", end="", flush=True)
 
     def set_playlist(self, playlist_number: int) -> None:

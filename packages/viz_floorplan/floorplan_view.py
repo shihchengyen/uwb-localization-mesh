@@ -73,7 +73,7 @@ class FloorplanView(QGraphicsView):
     pixelToMeterMapped = Signal(float, float, float, float)  # x_px, y_px, x_m, y_m when user clicks
     homographyComputed = Signal()  # Emitted when homography is successfully computed
     
-    def __init__(self, world_width_m=4.80, world_height_m=6.00, grid_cols=8, grid_rows=10, default_zone_radius_m=0.25, parent=None):
+    def __init__(self, world_width_m=6.00, world_height_m=4.80, grid_cols=10, grid_rows=8, default_zone_radius_m=0.25, parent=None):
         """
         Initialize FloorplanView.
         
@@ -110,6 +110,8 @@ class FloorplanView(QGraphicsView):
         self.zones = []  # List of Zone objects
         self.next_zone_id = 1
         self.placing_zones = False
+        self.max_zones = 5  # Maximum number of zones allowed
+        self.zone_playlists = {}  # {zone_id: playlist_number}
         
         # Pointer tracking
         self.pointer_item = None
@@ -138,6 +140,10 @@ class FloorplanView(QGraphicsView):
         self.setRenderHint(QPainter.Antialiasing)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.setBackgroundBrush(QBrush(QColor(245, 245, 245)))
+        
+        # Zone dragging
+        self.dragging_zone = None
+        self.drag_start_pos = None
     
     def load_image(self, filename: str) -> bool:
         """
@@ -294,11 +300,12 @@ class FloorplanView(QGraphicsView):
             return False
         
         # World coordinates for corners (TL, TR, BR, BL) in meters
+        # New coordinate system: origin at bottom-left, Y increases upward
         world_corners = np.array([
-            [0.0, 0.0],  # Top-left
-            [self.world_width_m, 0.0],  # Top-right
-            [self.world_width_m, self.world_height_m],  # Bottom-right
-            [0.0, self.world_height_m]  # Bottom-left
+            [0.0, self.world_height_m],  # Top-left (0, 480)
+            [self.world_width_m, self.world_height_m],  # Top-right (600, 480)
+            [self.world_width_m, 0.0],  # Bottom-right (600, 0)
+            [0.0, 0.0]  # Bottom-left (0, 0) - origin
         ], dtype=np.float32)
         
         # Image corners in pixels
@@ -482,17 +489,29 @@ class FloorplanView(QGraphicsView):
             radius_m: Zone radius in meters (defaults to self.default_zone_radius_m)
             
         Returns:
-            Zone object
+            Zone object or None if max zones reached
         """
+        # Check if we've reached the maximum number of zones
+        if len(self.zones) >= self.max_zones:
+            print(f"[FloorplanView] Maximum number of zones ({self.max_zones}) reached. Cannot place more zones.")
+            return None
+        
         if radius_m is None:
             radius_m = self.default_zone_radius_m
         zone = Zone(self.next_zone_id, x_m, y_m, radius_m)
+        
+        # Auto-assign playlist (1-5 based on zone number)
+        playlist_number = len(self.zones) + 1  # 1-based playlist numbering
+        self.zone_playlists[zone.id] = playlist_number
+        zone.playlist = playlist_number  # Store playlist on zone object for easy access
+        
         self.next_zone_id += 1
         self.zones.append(zone)
         
         # Visualize zone
         self._draw_zone(zone)
         
+        print(f"[FloorplanView] Zone {zone.id} placed with playlist {playlist_number}")
         return zone
     
     def place_rectangular_zone(self, x1_m: float, y1_m: float, x2_m: float, y2_m: float, zone_id=None):
@@ -629,6 +648,19 @@ class FloorplanView(QGraphicsView):
             zone.graphics_item.setBrush(QBrush(QColor(240, 240, 240, 30)))  # Very translucent white/gray
         
         self.scene.addItem(zone.graphics_item)
+        
+        # Add playlist label in the center of the zone
+        if hasattr(zone, 'playlist'):
+            playlist_text = QGraphicsTextItem(f"P{zone.playlist}")
+            playlist_text.setDefaultTextColor(QColor(0, 0, 0))
+            font = QFont("Arial", 12, QFont.Bold)
+            playlist_text.setFont(font)
+            text_rect = playlist_text.boundingRect()
+            # Center the text in the zone
+            playlist_text.setPos(center_px[0] - text_rect.width()/2, center_px[1] - text_rect.height()/2)
+            self.scene.addItem(playlist_text)
+            # Store text item for cleanup
+            zone.text_item = playlist_text
     
     def _draw_rectangular_zone(self, zone: RectangularZone):
         """Draw rectangular zone on floorplan with perspective-correct scaling."""
@@ -859,12 +891,15 @@ class FloorplanView(QGraphicsView):
         for zone in self.zones:
             if zone.graphics_item:
                 self.scene.removeItem(zone.graphics_item)
+            if hasattr(zone, 'text_item') and zone.text_item:
+                self.scene.removeItem(zone.text_item)
         self.zones = []
+        self.zone_playlists = {}
         self.next_zone_id = 1
         self.current_zone = None
     
     def _check_zone_registration(self):
-        """Check zone hover/leave timers."""
+        """Check zone hover/leave timers with proper zone transition handling."""
         if self.current_pointer_pos is None:
             return
         
@@ -880,10 +915,26 @@ class FloorplanView(QGraphicsView):
                 zone_found = zone
                 break
         
+        # Handle zone transitions - cancel timers and reset state
+        if zone_found != self.current_zone:
+            print(f"🔄 [FloorplanView] Zone transition: {getattr(self.current_zone, 'id', 'None')} -> {getattr(zone_found, 'id', 'None')}")
+            
+            # Cancel any existing timers
+            if self.zone_hover_start is not None:
+                self.zone_hover_start.stop()
+                self.zone_hover_start = None
+            if self.zone_leave_start is not None:
+                self.zone_leave_start.stop()
+                self.zone_leave_start = None
+            
+            # Update current zone (but don't change active status yet - let timer handle it)
+            self.current_zone = zone_found
+        
         # Zone registration logic
         if zone_found and not zone_found.is_active:
-            # Entering zone - start timer if not already started
+            # Entering new zone - start timer if not already started
             if self.zone_hover_start is None:
+                print(f"⏱️  [FloorplanView] Starting 3-second timer for Zone {zone_found.id}")
                 self.zone_hover_start = QTimer()
                 self.zone_hover_start.setSingleShot(True)
                 # Use a closure to capture the zone
@@ -891,31 +942,22 @@ class FloorplanView(QGraphicsView):
                     self._register_zone(zone_found)
                 self.zone_hover_start.timeout.connect(register_zone)
                 self.zone_hover_start.start(self.t_register_ms)
-            # Cancel leave timer if we're back in a zone
-            if self.zone_leave_start is not None:
-                self.zone_leave_start.stop()
-                self.zone_leave_start = None
         elif zone_found and zone_found.is_active:
-            # Still in zone - cancel any leave timer
-            if self.zone_leave_start is not None:
-                self.zone_leave_start.stop()
-                self.zone_leave_start = None
+            # Still in active zone - maintain activation
+            pass
         elif self.current_zone and self.current_zone.is_active:
-            # Leaving zone - start leave timer if not already started
+            # Leaving active zone - start leave timer if not already started
             if self.zone_leave_start is None:
+                print(f"⏱️  [FloorplanView] Starting 1-second leave timer for Zone {self.current_zone.id}")
                 self.zone_leave_start = QTimer()
                 self.zone_leave_start.setSingleShot(True)
                 # Use a closure to capture the current zone
                 current_zone_ref = self.current_zone
                 def deregister_zone():
-                    if current_zone_ref:
+                    if current_zone_ref and current_zone_ref.is_active:
                         self._deregister_zone(current_zone_ref)
                 self.zone_leave_start.timeout.connect(deregister_zone)
                 self.zone_leave_start.start(self.t_deregister_ms)
-            # Cancel hover timer since we're leaving
-            if self.zone_hover_start is not None:
-                self.zone_hover_start.stop()
-                self.zone_hover_start = None
         else:
             # Not in any zone - cancel all timers
             if self.zone_hover_start is not None:
@@ -926,7 +968,24 @@ class FloorplanView(QGraphicsView):
                 self.zone_leave_start = None
     
     def _register_zone(self, zone):
-        """Register zone (user entered and stayed)."""
+        """Register zone (user entered and stayed). Only one zone can be active at a time."""
+        print(f"🟢 [FloorplanView] Activating Zone {zone.id} - User stayed for 3+ seconds!")
+        
+        # Deactivate ALL other zones first
+        for other_zone in self.zones:
+            if other_zone != zone and other_zone.is_active:
+                print(f"    Deactivating Zone {other_zone.id} (replaced by Zone {zone.id})")
+                other_zone.is_active = False
+                # Redraw the deactivated zone
+                if other_zone.graphics_item:
+                    self.scene.removeItem(other_zone.graphics_item)
+                    other_zone.graphics_item = None
+                if isinstance(other_zone, RectangularZone):
+                    self._draw_rectangular_zone(other_zone)
+                else:
+                    self._draw_zone(other_zone)
+        
+        # Activate the new zone
         zone.is_active = True
         self.current_zone = zone
         
@@ -940,10 +999,12 @@ class FloorplanView(QGraphicsView):
         else:
             self._draw_zone(zone)
         
+        print(f"    Zone {zone.id} is now the ONLY active zone (bright green)")
         self.zoneRegistered.emit(zone)
     
     def _deregister_zone(self, zone):
         """Deregister zone (user left)."""
+        print(f"🔴 [FloorplanView] Deregistering Zone {zone.id} - User left zone!")
         zone.is_active = False
         
         # Update visualization (redraw to update colors and ensure correct size)
@@ -956,11 +1017,37 @@ class FloorplanView(QGraphicsView):
         else:
             self._draw_zone(zone)
         
+        print(f"    Zone {zone.id} should now return to normal color")
         self.zoneDeregistered.emit(zone)
         self.current_zone = None
+    
+    def _find_zone_at_position(self, x_m: float, y_m: float):
+        """Find zone at given world coordinates."""
+        for zone in self.zones:
+            if isinstance(zone, RectangularZone):
+                continue  # Skip rectangular zones for dragging
+            if zone.contains(x_m, y_m):
+                return zone
+        return None
+    
+    def _move_zone(self, zone: Zone, new_x_m: float, new_y_m: float):
+        """Move zone to new position and redraw."""
+        zone.x = new_x_m
+        zone.y = new_y_m
+        
+        # Remove old graphics items
+        if zone.graphics_item:
+            self.scene.removeItem(zone.graphics_item)
+            zone.graphics_item = None
+        if hasattr(zone, 'text_item') and zone.text_item:
+            self.scene.removeItem(zone.text_item)
+            zone.text_item = None
+        
+        # Redraw zone at new position
+        self._draw_zone(zone)
 
     def mousePressEvent(self, event):
-        """Handle mouse clicks for corner marking and zone placement."""
+        """Handle mouse clicks for corner marking, zone placement, and zone dragging."""
         if event.button() == Qt.LeftButton:
             # Map view coordinates to scene coordinates
             scene_pos = self.mapToScene(event.pos())
@@ -988,19 +1075,58 @@ class FloorplanView(QGraphicsView):
                     meter_coords = self.pixel_to_meter(x_px, y_px)
                     if meter_coords:
                         zone = self.place_zone(meter_coords[0], meter_coords[1])
-                        print(f"[FloorplanView] Zone {zone.id} placed at ({meter_coords[0]:.2f}m, {meter_coords[1]:.2f}m)")
-                        # Emit pixel-to-meter mapping for status bar (reuse already calculated coords)
-                        self.pixelToMeterMapped.emit(x_px, y_px, meter_coords[0], meter_coords[1])
+                        if zone:  # Only if zone was successfully placed (not at max limit)
+                            print(f"[FloorplanView] Zone {zone.id} placed at ({meter_coords[0]:.2f}m, {meter_coords[1]:.2f}m)")
+                            # Emit pixel-to-meter mapping for status bar (reuse already calculated coords)
+                            self.pixelToMeterMapped.emit(x_px, y_px, meter_coords[0], meter_coords[1])
                     else:
                         print(f"[FloorplanView] Warning: Could not convert pixel to meter coordinates")
                 except Exception as e:
                     print(f"[FloorplanView] Error placing zone: {e}")
                     import traceback
                     traceback.print_exc()
+            
             elif self.homography_matrix is not None and not self.marking_corners:
-                # Emit pixel-to-meter mapping for status bar display (only if not placing zones)
+                # Check if clicking on a zone for dragging
                 meter_coords = self.pixel_to_meter(x_px, y_px)
                 if meter_coords:
-                    self.pixelToMeterMapped.emit(x_px, y_px, meter_coords[0], meter_coords[1])
+                    zone = self._find_zone_at_position(meter_coords[0], meter_coords[1])
+                    if zone:
+                        # Start dragging this zone
+                        self.dragging_zone = zone
+                        self.drag_start_pos = meter_coords
+                        self.setDragMode(QGraphicsView.NoDrag)  # Disable view dragging while dragging zone
+                        print(f"[FloorplanView] Started dragging zone {zone.id}")
+                        return  # Don't emit pixel-to-meter mapping when starting drag
+                    else:
+                        # Emit pixel-to-meter mapping for status bar display
+                        self.pixelToMeterMapped.emit(x_px, y_px, meter_coords[0], meter_coords[1])
         
         super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """Handle mouse move events for zone dragging."""
+        if self.dragging_zone and self.homography_matrix is not None:
+            # Map view coordinates to scene coordinates
+            scene_pos = self.mapToScene(event.pos())
+            x_px = scene_pos.x()
+            y_px = scene_pos.y()
+            
+            # Convert to world coordinates
+            meter_coords = self.pixel_to_meter(x_px, y_px)
+            if meter_coords:
+                # Move the zone to new position
+                self._move_zone(self.dragging_zone, meter_coords[0], meter_coords[1])
+        
+        super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release events to end zone dragging."""
+        if event.button() == Qt.LeftButton and self.dragging_zone:
+            # End dragging
+            print(f"[FloorplanView] Finished dragging zone {self.dragging_zone.id} to ({self.dragging_zone.x:.2f}m, {self.dragging_zone.y:.2f}m)")
+            self.dragging_zone = None
+            self.drag_start_pos = None
+            self.setDragMode(QGraphicsView.ScrollHandDrag)  # Re-enable view dragging
+        
+        super().mouseReleaseEvent(event)

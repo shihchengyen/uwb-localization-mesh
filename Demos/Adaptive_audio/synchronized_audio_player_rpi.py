@@ -2,6 +2,8 @@
 """
 RPi Audio Player - MQTT Subscriber
 Receives synchronized audio commands and executes them at specified global times
+
+to run: uv run Demos/Adaptive_audio/synchronized_audio_player_rpi.py --wav Demos/Adaptive_audio/crazy-carls-brickhouse-tavern.wav --broker 192.168.68.59 --id 1
 """
 
 import json
@@ -26,8 +28,7 @@ DEFAULT_BROKER_PORT = 1884
 DEFAULT_USERNAME = "laptop"
 DEFAULT_PASSWORD = "laptop"
 # ====================================
-
-
+# to execute: uv run Demos/Adaptive_audio/synchronized_audio_player_rpi.py --id 0 --broker 192.168.68.65 
 class RPiAudioPlayer:
     def __init__(self, rpi_id: int, wav_file: str, broker_ip: str = DEFAULT_BROKER_IP):
         self.rpi_id = rpi_id
@@ -84,80 +85,131 @@ class RPiAudioPlayer:
             wav_path = pathlib.Path(self.wav_file)
             if not wav_path.exists():
                 raise FileNotFoundError(f"WAV file not found: {wav_path}")
+            print(f"🔧 WAV file found: {wav_path}")
             
             # Load the audio file with stereo channel separation
+            print(f"🔧 Loading stereo channel...")
             self.load_stereo_channel(str(wav_path))
+            print(f"🔧 Audio file loaded successfully")
+            
             self.audio_ready = True
             
             channel_name = "LEFT" if self.rpi_id in [1, 2] else "RIGHT"
             print(f"✅ Audio initialized successfully - Playing {channel_name} channel only")
             
         except Exception as e:
+            import traceback
             print(f"❌ Audio initialization failed: {e}")
+            print(f"❌ Traceback:")
+            traceback.print_exc()
             self.audio_ready = False
     
     def load_stereo_channel(self, wav_path: str):
-        """Load only the left or right channel of the stereo audio file."""
+        """
+        Load the appropriate channel (left or right) from stereo audio file
+        and duplicate it to BOTH speaker outputs for louder playback.
+        
+        - Left speakers (RPi 1, 2): Extract left channel, play on both L+R outputs
+        - Right speakers (RPi 0, 3): Extract right channel, play on both L+R outputs
+        """
         import numpy as np
         import wave
         
-        # Read the WAV file
-        with wave.open(wav_path, 'rb') as wav_file:
-            frames = wav_file.readframes(wav_file.getnframes())
-            sample_rate = wav_file.getframerate()
-            channels = wav_file.getnchannels()
-            sample_width = wav_file.getsampwidth()
-        
-        if channels != 2:
-            # If not stereo, just load normally
-            pygame.mixer.music.load(wav_path)
-            return
-        
-        # Convert bytes to numpy array
-        if sample_width == 2:  # 16-bit
-            audio_data = np.frombuffer(frames, dtype=np.int16)
-        elif sample_width == 4:  # 32-bit
-            audio_data = np.frombuffer(frames, dtype=np.int32)
-        else:
-            # Fallback to normal loading
-            pygame.mixer.music.load(wav_path)
-            return
-        
-        # Reshape to separate left and right channels
-        audio_data = audio_data.reshape(-1, 2)
-        
-        # Select the appropriate channel
-        if self.rpi_id in [1, 2]:  # Left speakers - play left channel
-            channel_data = audio_data[:, 0]
-        else:  # Right speakers (0, 3) - play right channel
-            channel_data = audio_data[:, 1]
-        
-        # Convert back to mono by duplicating the channel
-        mono_data = np.column_stack((channel_data, channel_data))
-        
-        # Convert back to bytes
-        if sample_width == 2:  # 16-bit
-            mono_bytes = mono_data.astype(np.int16).tobytes()
-        elif sample_width == 4:  # 32-bit
-            mono_bytes = mono_data.astype(np.int32).tobytes()
-        
-        # Create a temporary WAV file with the selected channel
-        temp_wav_path = f"temp_channel_{self.rpi_id}.wav"
-        with wave.open(temp_wav_path, 'wb') as temp_wav:
-            temp_wav.setnchannels(2)  # Keep as stereo for pygame compatibility
-            temp_wav.setsampwidth(sample_width)
-            temp_wav.setframerate(sample_rate)
-            temp_wav.writeframes(mono_bytes)
-        
-        # Load the processed audio
-        pygame.mixer.music.load(temp_wav_path)
-        
-        # Clean up temporary file after loading
-        import os
         try:
-            os.remove(temp_wav_path)
-        except:
-            pass
+            # Read the WAV file
+            print(f"   Reading WAV file: {wav_path}")
+            with wave.open(wav_path, 'rb') as wav_file:
+                frames = wav_file.readframes(wav_file.getnframes())
+                sample_rate = wav_file.getframerate()
+                channels = wav_file.getnchannels()
+                sample_width = wav_file.getsampwidth()
+            
+            print(f"   WAV info: {channels} channels, {sample_width} bytes/sample, {sample_rate} Hz")
+            
+            if channels != 2:
+                # If not stereo, just load normally
+                print(f"   Not stereo ({channels} channels), loading normally")
+                pygame.mixer.music.load(wav_path)
+                return
+            
+            # Convert bytes to numpy array
+            print(f"   Converting audio data to numpy array...")
+            if sample_width == 2:  # 16-bit
+                audio_data = np.frombuffer(frames, dtype=np.int16)
+            elif sample_width == 4:  # 32-bit
+                audio_data = np.frombuffer(frames, dtype=np.int32)
+            else:
+                # Fallback to normal loading
+                print(f"   Unsupported sample width ({sample_width}), falling back to normal loading")
+                pygame.mixer.music.load(wav_path)
+                return
+            
+            # Reshape to separate left and right channels
+            print(f"   Reshaping audio data...")
+            audio_data = audio_data.reshape(-1, 2)
+            
+            # Select the appropriate channel from the source audio
+            if self.rpi_id in [1, 2]:  # Left speakers - extract left channel
+                channel_data = audio_data[:, 0]
+                channel_name = "LEFT"
+            else:  # Right speakers (0, 3) - extract right channel
+                channel_data = audio_data[:, 1]
+                channel_name = "RIGHT"
+            
+            print(f"   Extracted {channel_name} channel")
+            
+            # Duplicate the selected channel to BOTH speaker outputs (L and R)
+            # This makes the speaker play louder by using both outputs
+            stereo_output = np.column_stack((channel_data, channel_data))
+            
+            # Convert back to bytes
+            if sample_width == 2:  # 16-bit
+                stereo_bytes = stereo_output.astype(np.int16).tobytes()
+            elif sample_width == 4:  # 32-bit
+                stereo_bytes = stereo_output.astype(np.int32).tobytes()
+            else:
+                # Unsupported sample width, fallback to normal loading
+                print(f"   Unsupported sample width: {sample_width}, falling back to normal loading")
+                pygame.mixer.music.load(wav_path)
+                return
+            
+            # Create a temporary WAV file with the selected channel on both outputs
+            temp_wav_path = f"temp_channel_{self.rpi_id}.wav"
+            print(f"   Creating temporary WAV file: {temp_wav_path}")
+            with wave.open(temp_wav_path, 'wb') as temp_wav:
+                temp_wav.setnchannels(2)  # Stereo output (same channel audio on both L and R)
+                temp_wav.setsampwidth(sample_width)
+                temp_wav.setframerate(sample_rate)
+                temp_wav.writeframes(stereo_bytes)
+            
+            # Load the processed audio
+            print(f"   Loading processed audio into pygame...")
+            pygame.mixer.music.load(temp_wav_path)
+            
+            print(f"   Loaded {channel_name} channel, playing on both speaker outputs for louder volume")
+            
+            # Clean up temporary file after loading
+            # Note: Keep the file until pygame actually needs it, then clean up
+            import os
+            import time
+            time.sleep(0.1)  # Small delay to ensure pygame has loaded the file
+            try:
+                os.remove(temp_wav_path)
+                print(f"   Cleaned up temporary file")
+            except Exception as e:
+                print(f"   Warning: Could not remove temporary file: {e}")
+                
+        except Exception as e:
+            import traceback
+            print(f"   ❌ Error in load_stereo_channel: {e}")
+            traceback.print_exc()
+            # Try to load the original file as fallback
+            try:
+                print(f"   Attempting fallback: loading original file directly")
+                pygame.mixer.music.load(wav_path)
+            except Exception as e2:
+                print(f"   ❌ Fallback also failed: {e2}")
+                raise  # Re-raise the original exception
     
     def connect_mqtt(self):
         """Connect to MQTT broker and set up callbacks."""
@@ -229,7 +281,13 @@ class RPiAudioPlayer:
         """Execute an audio command."""
         if not self.audio_ready:
             print(f"⚠️  Audio not ready, skipping command: {command}")
-            return
+            print(f"⚠️  Attempting to reinitialize audio...")
+            # Try to reinitialize audio
+            self.init_audio()
+            if not self.audio_ready:
+                print(f"⚠️  Audio reinitialization failed, command skipped")
+                return
+            print(f"✅ Audio reinitialized successfully")
         
         try:
             if command == "start":

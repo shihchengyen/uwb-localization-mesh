@@ -49,4 +49,73 @@ This is slightly more complicated due to the logic on the PYQT side and implemen
 - Album name can be removed 
 - Bypass Audio Processing
 
+# Additional Changes (Phase 2)
+
+## Coordinate System Update
+1. Rearrange the coordinate system:
+   - Bottom left corner should be (0,0)
+   - Bottom right should be (600,0) 
+   - Top left should be (0,480)
+   - Top right should be (600,480)
+   - This creates a 600x480 coordinate system with origin at bottom-left
+
+## Zone System Redesign
+2. Remove default adaptive audio zones (top/bottom half split):
+   - Remove the automatic Zone A/Zone B rectangular zones in adaptive audio
+   - All zones should be user-designated circular zones
+   - Zone placement should be in global coordinates (0,0) to (600,480)
+   - Zone coordinates should be independent of rendered image coordinates
+   - Zone 1 plays playlist 1, Zone 2 plays playlist 2, etc. (up to 5 zones max)
+
+## Adaptive Audio Simplification  
+3. Adaptive Audio screen changes:
+   - Remove zone-based logic completely
+   - Just play from playlist 1 continuously
+   - No zone registration/deregistration needed
+   - Simplified position-based audio panning without zones
+
+## Additional Updates (Phase 3)
+
+### PGO Widget Coordinate System Update
+4. Updated PGO plot widget to use new 600x480 coordinate system:
+   - Changed world dimensions from 4.80x6.00 to 6.00x4.80 meters
+   - Updated grid from 8x10 to 10x8 cells
+   - Removed Y-axis inversion (origin now at bottom-left)
+   - Updated documentation and comments
+
+### Anchor Position Updates  
+5. Updated anchor positions across all files:
+   - Server_bring_up_with_Audio.py: Updated to new coordinate system
+   - DummyServerBringUp.py: Updated anchor positions to match
+   - Anchor_bring_up.py: Descriptions already match new system
+
+### Auto-Detect Corners Fix
+6. Fixed auto-detect corners functionality:
+   - Added auto-centering for default floorplan loading
+   - Implemented _center_default_floorplan() method
+   - Applied centering to both specific and fallback floorplan loading
+   - Uses 10% margins for proper centering within coordinate bounds
+
+### Zone Activation Debugging
+7. Added comprehensive debug logging for zone activation:
+   - FloorplanView: Logs when zones register/deregister with visual feedback status
+   - ZoneDjWidget: Logs playlist changes and server state verification
+   - Clear console output shows zone activation flow and playlist switching
+   - Helps verify the 3-second activation timer and playlist changes are working
+
+### Zone Transition Fix
+8. Fixed zone transition logic for direct zone-to-zone movement:
+   - Detects when user moves directly from Zone 1 to Zone 3 without exiting
+   - Immediately deactivates old zone when transitioning to new zone
+   - Cancels conflicting timers during zone transitions
+   - Starts new 3-second timer for the new zone
+   - Prevents multiple active zones and ensures proper playlist switching
+
+### Zone System Simplification
+9. Simplified zone system to only two clear states:
+   - **Current Zone**: Zone user is currently in (immediate detection, light green)
+   - **Active Zone**: Zone that's been active for 3+ seconds (bright green, controls playlist)
+   - When any zone becomes active, ALL other zones are immediately deactivated
+   - Only one zone can be active at a time - clean and predictable behavior
+   - Removed complex timer management and state conflicts
 
