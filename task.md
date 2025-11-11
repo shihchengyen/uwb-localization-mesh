@@ -119,3 +119,12 @@ This is slightly more complicated due to the logic on the PYQT side and implemen
    - Only one zone can be active at a time - clean and predictable behavior
    - Removed complex timer management and state conflicts
 
+### Adaptive Audio Complete Simplification
+10. Removed all zone functionality from Adaptive Audio widget:
+   - No zones displayed on floorplan in adaptive audio mode
+   - No playlist switching - always uses Playlist 1
+   - Pure position-based audio panning (front/back, left/right)
+   - Immediate response to position changes without zone timers
+   - Disabled zone placement functionality in adaptive audio mode
+   - Clean separation between Zone DJ (user zones) and Adaptive Audio (position-only)
+
