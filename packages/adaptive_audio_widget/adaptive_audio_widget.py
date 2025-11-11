@@ -45,18 +45,12 @@ class AdaptiveAudioWidget(QWidget):
         self.bus = app_bus
         self.settings = settings
         
-        # Configuration
-        self.world_width_m = settings.value("world/width_m", 4.80, type=float)
-        self.world_height_m = settings.value("world/height_m", 6.00, type=float)
-        self.split_y_m = settings.value("adaptive/split_y_m", 3.00, type=float)
-        self.t_register_ms = settings.value("adaptive/t_register_ms", 3000, type=int)
-        self.t_deregister_ms = settings.value("adaptive/t_deregister_ms", 1000, type=int)
+        # Configuration - updated for new coordinate system
+        self.world_width_m = settings.value("world/width_m", 6.00, type=float)
+        self.world_height_m = settings.value("world/height_m", 4.80, type=float)
+        # Remove zone-based configuration - adaptive audio no longer uses zones
         
-        # State
-        self.current_zone = None  # "A" or "B"
-        self.zone_entry_time = None
-        self.zone_exit_time = None
-        self.zone_registered = False
+        # State - simplified for non-zone based adaptive audio
         self.is_bypassed = False
         self.active_speakers = []  # List of active device IDs
         
@@ -75,15 +69,6 @@ class AdaptiveAudioWidget(QWidget):
         
         # Enable speaker visualization (only for Adaptive Audio)
         self.floorplan.set_show_speakers(True)
-        
-        # Create zones if homography is already available
-        if self.floorplan.homography_matrix is not None:
-            self._setup_adaptive_zones()
-        
-        # Zone check timer
-        self.zone_timer = QTimer()
-        self.zone_timer.timeout.connect(self._check_zone_state)
-        self.zone_timer.start(100)  # Check every 100ms
         
         # Queue polling timer for direct server access
         self.queue_timer = QTimer()
@@ -119,9 +104,7 @@ class AdaptiveAudioWidget(QWidget):
             )
         layout.addWidget(self.floorplan, stretch=1)
         
-        # Create rectangular zones for Adaptive Audio (Zone A and Zone B)
-        # Note: Zones will be drawn once homography is computed
-        self.adaptive_zones = {}  # Will be populated in _setup_adaptive_zones
+        # No zones needed for simplified adaptive audio
         
         # Right sidebar (fixed width via MiniPlayer)
         sidebar = QVBoxLayout()
@@ -133,20 +116,8 @@ class AdaptiveAudioWidget(QWidget):
         title.setStyleSheet("font-size: 14pt; font-weight: bold;")
         sidebar.addWidget(title)
         
-        # Remove bypass audio processing as requested
-        
-        # Zone info
-        zone_group = QGroupBox("Zone Status")
-        zone_layout = QVBoxLayout()
-        
-        self.zone_label = QLabel("Current Zone: --")
-        zone_layout.addWidget(self.zone_label)
-        
-        self.registration_label = QLabel("Status: Not registered")
-        zone_layout.addWidget(self.registration_label)
-        
-        zone_group.setLayout(zone_layout)
-        sidebar.addWidget(zone_group)
+        # Remove bypass audio processing and zone info as requested
+        # Adaptive audio now works without zones - just position-based panning
         
         # Mini player
         from mini_player.mini_player import MiniPlayer
@@ -198,68 +169,7 @@ class AdaptiveAudioWidget(QWidget):
             }
         """)
     
-    def _setup_adaptive_zones(self):
-        """Create rectangular zones for Adaptive Audio (Zone A and Zone B)."""
-        # Only create zones if homography is available
-        if self.floorplan.homography_matrix is None:
-            # Zones will be created when homography is computed
-            return
-        
-        # Zone A (Top): 0.00 m ≤ y < split_y_m
-        # Zone B (Bottom): split_y_m ≤ y ≤ world_height_m
-        self.zone_a = self.floorplan.place_rectangular_zone(
-            0.0, 0.0, 
-            self.world_width_m, self.split_y_m,
-            zone_id="A"
-        )
-        self.zone_b = self.floorplan.place_rectangular_zone(
-            0.0, self.split_y_m,
-            self.world_width_m, self.world_height_m,
-            zone_id="B"
-        )
-        # Store reference to zones for easy access
-        self.adaptive_zones = {"A": self.zone_a, "B": self.zone_b}
-        
-        # Disable FloorplanView's automatic zone registration for these zones
-        # Adaptive Audio handles its own zone registration logic
-        # We don't want FloorplanView's timer to register these zones automatically
-        # because that would trigger zone_dj_demo() via ZoneDjWidget's signal handler
-        for zone in [self.zone_a, self.zone_b]:
-            # Mark zones so FloorplanView's _check_zone_registration skips them
-            zone._skip_auto_registration = True
-    
-    def clear_adaptive_zones(self):
-        """Clear Adaptive Audio zones from the floorplan."""
-        if not hasattr(self, 'adaptive_zones') or not self.adaptive_zones:
-            return
-        
-        # Remove zones from floorplan
-        from viz_floorplan.floorplan_view import RectangularZone
-        zones_to_remove = []
-        for zone in self.floorplan.zones:
-            if isinstance(zone, RectangularZone) and zone.id in ["A", "B"]:
-                zones_to_remove.append(zone)
-        
-        # Remove graphics items and zones
-        for zone in zones_to_remove:
-            if zone.graphics_item:
-                self.floorplan.scene.removeItem(zone.graphics_item)
-            if zone in self.floorplan.zones:
-                self.floorplan.zones.remove(zone)
-        
-        # Clear references
-        self.adaptive_zones = {}
-        self.zone_a = None
-        self.zone_b = None
-        
-        # Reset zone state
-        self.current_zone = None
-        self.zone_registered = False
-        self.zone_entry_time = None
-        if hasattr(self, 'registration_label'):
-            self.registration_label.setText("Status: Not registered")
-        if hasattr(self, 'current_zone_label'):
-            self.current_zone_label.setText("Current Zone: None")
+    # Removed zone setup methods - adaptive audio no longer uses zones
     
     def _connect_mini_player_signals(self):
         """Connect mini_player signals to handlers."""
@@ -282,9 +192,6 @@ class AdaptiveAudioWidget(QWidget):
         """Subscribe to AppBus state updates."""
         # Position updates
         self.bus.pointerUpdated.connect(self._on_pointer_updated)
-        
-        # Connect to floorplan signals to create zones when homography is ready
-        self.floorplan.homographyComputed.connect(self._on_homography_computed)
         
         # Playback state updates
         self.bus.queueUpdated.connect(self._on_queue_updated)
@@ -360,115 +267,20 @@ class AdaptiveAudioWidget(QWidget):
         """Handle shuffle toggle."""
         self.bus.shuffleToggled.emit(checked)
     
-    # Removed bypass audio processing as requested
-    
-    def _on_homography_computed(self):
-        """Handle homography computation - create zones now."""
-        # Create zones once homography is available
-        if not self.adaptive_zones:
-            self._setup_adaptive_zones()
+    # Removed bypass audio processing and zone methods as requested
     
     # ================================================================
     # STATE UPDATE HANDLERS (Receive from AppBus)
     # ================================================================
     
     def _on_pointer_updated(self, x_m: float, y_m: float, ts: float, source: str):
-        """Update floorplan pointer and determine zone."""
+        """Update floorplan pointer - simplified for non-zone adaptive audio."""
         # Update floorplan visualization
         self.floorplan.map_pointer(x_m, y_m)
         
-        # Determine zone (Adaptive: split at y=3.0m)
-        if y_m < self.split_y_m:
-            zone_id = "A"
-        else:
-            zone_id = "B"
-        
-        # Update zone state
-        if zone_id != self.current_zone:
-            # If we were in a different zone, mark exit time
-            if self.current_zone is not None:
-                self.zone_exit_time = time.time()
-            self.current_zone = zone_id
-            self.zone_entry_time = time.time()
-            self.zone_exit_time = None
-            self.zone_label.setText(f"Current Zone: {zone_id}")
-        
-        # Zone registration is handled by timer (_check_zone_state)
+        # No zone logic needed - adaptive audio now works purely on position-based panning
     
-    def _check_zone_state(self):
-        """Check zone registration timers."""
-        if self.current_zone is None:
-            return
-        
-        current_time = time.time()
-        
-        # Registration logic
-        if not self.zone_registered and self.zone_entry_time:
-            time_in_zone = (current_time - self.zone_entry_time) * 1000  # ms
-            if time_in_zone >= self.t_register_ms:
-                # Register zone
-                self.zone_registered = True
-                self.registration_label.setText(f"Status: Registered to Zone {self.current_zone}")
-                
-                # Update zone visualization (turn green)
-                if self.current_zone in self.adaptive_zones:
-                    zone = self.adaptive_zones[self.current_zone]
-                    zone.is_active = True
-                    # Redraw zone to show green tint
-                    if zone.graphics_item:
-                        self.floorplan.scene.removeItem(zone.graphics_item)
-                        zone.graphics_item = None
-                    from viz_floorplan.floorplan_view import RectangularZone
-                    if isinstance(zone, RectangularZone):
-                        self.floorplan._draw_rectangular_zone(zone)
-                
-                # Calculate zone center position for the event
-                if self.current_zone in self.adaptive_zones:
-                    zone = self.adaptive_zones[self.current_zone]
-                    zone_x = (zone.x1 + zone.x2) / 2.0
-                    zone_y = (zone.y1 + zone.y2) / 2.0
-                else:
-                    zone_x = 0.0
-                    zone_y = 0.0
-                
-                # Emit zone registered event
-                self.bus.zoneRegistered.emit(
-                    self.current_zone, zone_x, zone_y, current_time, "adaptive_widget"
-                )
-                
-                # Start adaptive audio for this zone (send event and position to server)
-                params = {
-                    "zone_id": self.current_zone,
-                    "position": (zone_x, zone_y)
-                }
-                self.bus.audioStartRequested.emit("adaptive", params)
-        
-        # Deregistration logic
-        if self.zone_registered and self.zone_exit_time:
-            time_out_zone = (current_time - self.zone_exit_time) * 1000  # ms
-            if time_out_zone >= self.t_deregister_ms:
-                # Deregister zone
-                old_zone = self.current_zone
-                self.zone_registered = False
-                self.registration_label.setText("Status: Not registered")
-                self.registration_label.setStyleSheet("color: #888888;")
-                
-                # Update zone visualization (turn gray)
-                if old_zone in self.adaptive_zones:
-                    zone = self.adaptive_zones[old_zone]
-                    zone.is_active = False
-                    # Redraw zone to show gray tint
-                    if zone.graphics_item:
-                        self.floorplan.scene.removeItem(zone.graphics_item)
-                        zone.graphics_item = None
-                    from viz_floorplan.floorplan_view import RectangularZone
-                    if isinstance(zone, RectangularZone):
-                        self.floorplan._draw_rectangular_zone(zone)
-                
-                # Emit zone deregistered event
-                self.bus.zoneDeregistered.emit(
-                    old_zone, 0.0, 0.0, current_time, "adaptive_widget"
-                )
+    # Removed zone checking methods - adaptive audio no longer uses zones
     
     def _on_queue_updated(self, queue_preview: list, current_track: str):
         """Update mini_player queue display."""

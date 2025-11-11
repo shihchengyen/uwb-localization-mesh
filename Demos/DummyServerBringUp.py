@@ -69,13 +69,13 @@ class DummyServerBringUpProMax:
     ):
         """Initialize the dummy server with configuration."""
 
-        # Ground truth anchor positions (cm)
+        # Ground truth anchor positions (cm) - Consistent with Basic_render_graph
         # Anchors are mounted at 239 cm (2.39m) height
         self.true_nodes = {
             0: np.array([480, 600, 0]),  # top-right
             1: np.array([0, 600, 0]),    # top-left
             2: np.array([480, 0, 0]),    # bottom-right
-            3: np.array([0, 0, 0])       # bottom-left (origin in XY, but at sensor height in Z)
+            3: np.array([0, 0, 0])       # bottom-left (origin)
         }
 
         # Working copy of nodes that can be jittered (jittering temporarily disabled)
@@ -146,13 +146,13 @@ class DummyServerBringUpProMax:
         Generate a simulated user position that moves around the space.
         Returns position in cm as [x, y, z].
         """
-        # Space dimensions: 480cm x 600cm (4.8m x 6m)
+        # Space dimensions: 480cm x 600cm (4.8m x 6m) - consistent with Basic_render_graph
         # Create a figure-8 pattern that covers the space
         scale_t = t * self.simulation_speed * 0.5  # Adjust speed
 
         # Figure-8 pattern parameters
-        a = 200  # Width of figure-8 (cm)
-        b = 150  # Height of figure-8 (cm)
+        a = 180  # Width of figure-8 (cm) - adjusted for 480cm width
+        b = 220  # Height of figure-8 (cm) - adjusted for 600cm height
 
         # Center the pattern in the space
         center_x = 240  # Center of 480cm width
@@ -166,8 +166,8 @@ class DummyServerBringUpProMax:
         z = 0.0
 
         # Ensure we stay within bounds with some margin
-        x = np.clip(x, 50, 430)  # 50cm margin from edges
-        y = np.clip(y, 50, 550)  # 50cm margin from edges
+        x = np.clip(x, 50, 430)  # 50cm margin from edges (480-50=430)
+        y = np.clip(y, 50, 550)  # 50cm margin from edges (600-50=550)
 
         return np.array([x, y, z])
 

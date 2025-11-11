@@ -23,7 +23,7 @@ from packages.localization_algos.edge_creation.anchor_edges import create_anchor
 from packages.localization_algos.pgo.solver import PGOSolver
 from packages.uwb_mqtt_server.server import UWBMQTTServer
 from packages.uwb_mqtt_server.config import MQTTConfig
-from packages.audio_mqtt_server.follow_me_audio_server import AdaptiveAudioServer, clamp
+from packages.audio_mqtt_server.adaptive_audio_controller import AdaptiveAudioController as AdaptiveAudioServer, clamp
 
 # Setup JSON logging
 logging.basicConfig(
@@ -38,8 +38,6 @@ DEFAULT_BROKER_IP = "localhost"
 DEFAULT_BROKER_PORT = 1884
 DEFAULT_USERNAME = "laptop"
 DEFAULT_PASSWORD = "laptop"
-
-
 
 class ServerBringUpProMax:
     """
@@ -58,15 +56,14 @@ class ServerBringUpProMax:
     ):
         """Initialize the server with configuration."""
         
-        # Ground truth anchor positions (cm) - Consistent with Basic_render_graph
+        # Ground truth anchor positions (cm)
         # Anchors are mounted at 239 cm (2.39m) height
         self.true_nodes = {
             0: np.array([480, 600, 0]),  # top-right
             1: np.array([0, 600, 0]),    # top-left
             2: np.array([480, 0, 0]),    # bottom-right
-            3: np.array([0, 0, 0])       # bottom-left (origin)
-        } 
-        
+            3: np.array([0, 0, 0])       # bottom-left (origin in XY, but at sensor height in Z)
+        }
         # Working copy of nodes that can be jittered (jittering temporarily disabled)
         self.nodes = self.true_nodes.copy()
         self.jitter_std = jitter_std
@@ -96,42 +93,36 @@ class ServerBringUpProMax:
         # Pre-compute anchor-anchor edges
         self._anchor_edges = create_anchor_anchor_edges(self.anchor_config)
         
+        # Audio server
+        self.adaptive_audio_server = AdaptiveAudioServer(broker=mqtt_config.broker, port=mqtt_config.port)
+        
+
+        """Initialize audio server with MQTT connection."""
+        
+        # Audio MQTT setup
+        client_id = f"server_bring_up_pro_max_{uuid.uuid4()}"
+        self.audio_client = mqtt.Client(client_id=client_id)
+        self.audio_client.username_pw_set(username=DEFAULT_USERNAME, password=DEFAULT_PASSWORD)
+
+        self.audio_topic = "audio/commands"
+
         # Start MQTT server
         self.uwb_mqtt_server = UWBMQTTServer(
             config=mqtt_config,
             on_measurement=self._handle_measurement
         )
 
-        # Audio server (computes state, doesn't publish)
-        self.adaptive_audio_server = AdaptiveAudioServer()
-        
-        # Audio MQTT setup for publishing commands
-        client_id = f"server_bring_up_pro_max_{uuid.uuid4()}"
-        self.audio_client = mqtt.Client(client_id=client_id)
-        self.audio_client.username_pw_set(username=DEFAULT_USERNAME, password=DEFAULT_PASSWORD)
-        self.audio_topic = "audio/commands"
-        
+        # State of speakers
+        self.current_pair: Optional[str] = None  # "front" or "back"
+        self.started_for_pair: Optional[str] = None
+        self.volumes = {0: 70, 1: 70, 2: 70, 3: 70}
+        self._last_position = None
+
         # Connect MQTT for audio
         self.audio_client.connect(mqtt_config.broker, mqtt_config.port, mqtt_config.keepalive)
         self.audio_client.loop_start()
-
-        # Audio loop control
-        self._adaptive_audio_active = threading.Event()
-        self._zone_dj_active = threading.Event()
-        self._adaptive_audio_thread: Optional[threading.Thread] = None
-        self._zone_dj_thread: Optional[threading.Thread] = None
         
-        # Volume tracking (for compatibility with main_demo.py)
-        self._volumes_lock = threading.Lock()
-        self.volumes = {0: 70, 1: 70, 2: 70, 3: 70}  # Default volumes
-        
-        # Simulation speed property (for compatibility)
-        self.simulation_speed = 1.0
-        
-        # Track state for playback simulation
-        self.current_playlist = 1
-        self.current_track_index = 0
-        self.current_seek_position = 0.0
+        print("🎛️ Follow-Me Audio Server initialized")
 
         # Processing thread control
         self._stop_event = threading.Event()
@@ -139,8 +130,6 @@ class ServerBringUpProMax:
             target=self._process_measurements,
             daemon=True
         )
-        
-        print("🎛️ Server Bring-Up Pro Max initialized")
         
         logger.info(json.dumps({
             "event": "server_initialized",
@@ -158,35 +147,9 @@ class ServerBringUpProMax:
             return self._filtered_binners[phone_id]
         
     def _publish(self, topic: str, payload_obj: dict) -> None:
-        """Publish MQTT message."""
         payload = json.dumps(payload_obj, separators=(",", ":"))
         self.audio_client.publish(topic, payload, qos=1)
-
-    def _publish_commands(self, commands: list) -> None:
-        """
-        Publish audio commands to MQTT.
-        
-        Args:
-            commands (list of command dicts from AdaptiveAudioServer)
-        """
-        for cmd in commands:
-            msg = {
-                "command": cmd['command'],
-                "execute_time": cmd['execute_time'],
-                "rpi_id": cmd['rpi_id'],
-                "command_id": str(uuid.uuid4()),
-            }
-            if cmd['volume'] is not None:
-                msg["target_volume"] = clamp(cmd['volume'])
-
-            if cmd['rpi_id'] is None:
-                topic = f"{self.audio_topic}/broadcast"
-            else:
-                topic = f"{self.audio_topic}/rpi_{cmd['rpi_id']}"
-            
-            self._publish(topic, msg)
-
-
+                
     def start(self):
         """Start the server and processing thread."""
         # Start MQTT
@@ -199,141 +162,52 @@ class ServerBringUpProMax:
             "event": "server_started"
         }))
     
-    def adaptive_audio_start(self):
+    def adaptive_audio_demo(self):
         """Start the adaptive audio demo in a background thread."""
-        if self._adaptive_audio_thread is None or not self._adaptive_audio_thread.is_alive():
-            self._adaptive_audio_active.set()
-            self._adaptive_audio_thread = threading.Thread(
-                target=self._adaptive_audio_loop,
-                daemon=True
-            )
-            self._adaptive_audio_thread.start()
-            logger.info(json.dumps({"event": "adaptive_audio_started"}))
+        with self._position_lock:
+            position = self.user_position
+        if position is not None:
+            self.adaptive_audio_server.start_all()
 
-    def adaptive_audio_stop(self):
+
+    def stop_adaptive_audio_demo(self):
         """Stop the adaptive audio demo background thread."""
-        self._adaptive_audio_active.clear()
-        # Send pause commands
-        global_time = time.time()
-        pause_state = self.adaptive_audio_server.compute_pause_all_state(global_time)
-        self._publish_commands(pause_state['commands'])
-        logger.info(json.dumps({"event": "adaptive_audio_stopped"}))
+        self.adaptive_audio_server.pause_all()
 
     def _adaptive_audio_loop(self):
-        """
-        Background loop for adaptive audio demo.
-        
-        Polls user position and publishes commands to specific RPi topics.
-        Even though audio_state reports "front" or "back" pairs conceptually,
-        the commands contain explicit rpi_id values (0, 1, 2, 3) which are used
-        to publish to the correct MQTT topics (e.g., audio/commands/rpi_2).
-        """
-        update_interval = 0.1  # Update every 100ms
-        while self._adaptive_audio_active.is_set() and not self._stop_event.is_set():
-            try:
-                # Get current position (thread-safe)
-                with self._position_lock:
-                    position = self.user_position
-                
-                if position is not None:
-                    # Compute audio state (returns commands with explicit rpi_id values)
-                    global_time = time.time()
-                    audio_state = self.adaptive_audio_server.compute_adaptive_audio_state(
-                        position, global_time
-                    )
-                    
-                    # Publish commands to specific RPi topics based on rpi_id in each command
-                    if audio_state['commands']:
-                        self._publish_commands(audio_state['commands'])
-                        
-                        # Log status
-                        vols = audio_state['volumes']
-                        pair = audio_state['current_pair'] or "unknown"
-                        logger.debug(json.dumps({
-                            "event": "adaptive_audio_update",
-                            "pair": pair,
-                            "volumes": vols,
-                            "n_commands": len(audio_state['commands'])
-                        }))
-                
-                time.sleep(update_interval)
-            except Exception as e:
-                logger.error(json.dumps({
-                    "event": "adaptive_audio_loop_error",
-                    "error": str(e)
-                }))
-                time.sleep(update_interval)
-
-    def zone_dj_start(self):
+        """Background loop for adaptive audio demo."""
+    
+    def zone_dj_demo(self):
         """Start the zone DJ demo in a background thread."""
-        if self._zone_dj_thread is None or not self._zone_dj_thread.is_alive():
-            self._zone_dj_active.set()
-            self._zone_dj_thread = threading.Thread(
-                target=self._zone_dj_loop,
-                daemon=True
-            )
-            self._zone_dj_thread.start()
-            logger.info(json.dumps({"event": "zone_dj_started"}))
+        # TODO: Implement zone_dj_start in AdaptiveAudioController
+        # play 70% at all speakers
+        # self.adaptive_audio_server.zone_dj_start()
+        logger.info(json.dumps({"event": "zone_dj_demo_started"}))
 
-    def zone_dj_stop(self):
+    def stop_zone_dj_demo(self):
         """Stop the zone DJ demo background thread."""
-        self._zone_dj_active.clear()
-        # Send pause commands
-        global_time = time.time()
-        pause_state = self.adaptive_audio_server.compute_pause_all_state(global_time)
-        self._publish_commands(pause_state['commands'])
-        logger.info(json.dumps({"event": "zone_dj_stopped"}))
+        # TODO: Implement zone_dj_pause in AdaptiveAudioController
+        # self.adaptive_audio_server.zone_dj_pause()
+        logger.info(json.dumps({"event": "zone_dj_demo_stopped"}))
 
-    def _zone_dj_loop(self):
-        """Background loop for zone DJ demo."""
-        # Zone DJ starts once, then just maintains
-        global_time = time.time()
-        zone_dj_state = self.adaptive_audio_server.compute_zone_dj_state(global_time)
-        self._publish_commands(zone_dj_state['commands'])
-        
-        logger.info(json.dumps({
-            "event": "zone_dj_initialized",
-            "volumes": zone_dj_state['volumes']
-        }))
-        
-        # Keep thread alive while active (can be extended for periodic updates)
-        while self._zone_dj_active.is_set() and not self._stop_event.is_set():
-            time.sleep(0.5)
 
     def set_playlist(self, playlist_number: int):
-        """
-        Set the current playlist by number (1-5).
-        Updates the AdaptiveAudioServer's song queue.
-        """
-        # Update AdaptiveAudioServer playlist
-        if self.adaptive_audio_server:
-            self.adaptive_audio_server.set_playlist(playlist_number)
-        
-        # Store playlist selection for compatibility
-        self.current_playlist = playlist_number
+        """Set the current playlist by number (1-5)."""
+        self.adaptive_audio_server.set_playlist(playlist_number)
         logger.info(json.dumps({
             "event": "playlist_set",
             "playlist_number": playlist_number
         }))
-
+        
     def stop(self):
         """Stop all processing."""
         self._stop_event.set()
-        
-        # Stop audio loops
-        self.adaptive_audio_stop()
-        self.zone_dj_stop()
-        
-        # Wait for threads to finish
-        if self._adaptive_audio_thread and self._adaptive_audio_thread.is_alive():
-            self._adaptive_audio_thread.join(timeout=1.0)
-        if self._zone_dj_thread and self._zone_dj_thread.is_alive():
-            self._zone_dj_thread.join(timeout=1.0)
-        
-        # Stop MQTT
         self.uwb_mqtt_server.stop()
-        self.audio_client.loop_stop()
-        self.audio_client.disconnect()
+
+        # Audio server shutdown
+        self.adaptive_audio_server.pause_all()
+        self.adaptive_audio_server.shutdown()
+        self.adaptive_audio_server.shutdown()
 
         logger.info(json.dumps({
             "event": "server_stopped"
@@ -485,15 +359,78 @@ class ServerBringUpProMax:
                 
             # Sleep briefly to prevent tight loop
             time.sleep(0.01)
+
+
+    def _apply_state(self, pair: str, left_vol: int, right_vol: int) -> None:
+        """Send MQTT commands to apply the given pair and volumes."""
+        """Calls _send_audio_command for each speaker."""
+        if pair == "front":
+            # Active: speakers 2 (LEFT), 3 (RIGHT). Inactive: 0,1
+            # Ensure active pair is started at least once
+            if self.started_for_pair != pair:
+                # Unmute all first to ensure START is heard
+                for r in [0, 1, 2, 3]:
+                    self._send_audio_command("volume", rpi_id=r, volume=70)
+                for r in [0, 1, 2, 3]:
+                    self._send_audio_command("start", rpi_id=r)
+                self.started_for_pair = pair
+
+            # Set active volumes
+            self._send_audio_command("volume", rpi_id=2, volume=left_vol)
+            self._send_audio_command("volume", rpi_id=3, volume=right_vol)
+            # Mute inactive
+            self._send_audio_command("volume", rpi_id=0, volume=0)
+            self._send_audio_command("volume", rpi_id=1, volume=0)
+
+        else:  # back
+            # Active: speakers 1 (LEFT), 0 (RIGHT). Inactive: 2,3
+            if self.started_for_pair != pair:
+                for r in [0, 1, 2, 3]:
+                    self._send_audio_command("volume", rpi_id=r, volume=70)
+                for r in [0, 1, 2, 3]:
+                    self._send_audio_command("start", rpi_id=r)
+                self.started_for_pair = pair
+
+            self._send_audio_command("volume", rpi_id=1, volume=left_vol)
+            self._send_audio_command("volume", rpi_id=0, volume=right_vol)
+            # Mute inactive
+            self._send_audio_command("volume", rpi_id=2, volume=0)
+            self._send_audio_command("volume", rpi_id=3, volume=0)
+
+        self.current_pair = pair
+
+    def _send_audio_command(self, command: str, rpi_id: Optional[int] = None, volume: Optional[int] = None) -> None:
+        now = time.time()
+        execute_time = now + 0.5  # 500ms lookahead
+        msg = {
+            "command": command,
+            "execute_time": execute_time,
+            "global_time": now,
+            "delay_ms": 500,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "rpi_id": rpi_id,
+            "command_id": str(uuid.uuid4()),
+        }
+        if volume is not None:
+            msg["target_volume"] = clamp(volume)
+
+        if rpi_id is None:
+            topic = f"{self.audio_topic}/broadcast"
+        else:
+            topic = f"{self.audio_topic}/rpi_{rpi_id}"
+        self._publish(topic, msg)
+
+        # Track local volume state (for live monitoring)
+        if command == "volume" and rpi_id is not None and volume is not None:
+            self.volumes[rpi_id] = clamp(volume)
     
     # ================================================================
     # MISSING METHODS IMPLEMENTATION
     # ================================================================
     
     def get_speaker_volumes(self) -> Dict[int, int]:
-        """Get current speaker volumes from local tracking."""
-        with self._volumes_lock:
-            return self.volumes.copy()
+        """Get current speaker volumes."""
+        return self.volumes.copy()
     
     def get_speaker_positions(self) -> Dict[int, np.ndarray]:
         """Get speaker positions in world coordinates (meters)."""
@@ -510,67 +447,35 @@ class ServerBringUpProMax:
     def play(self):
         """Start playback."""
         if self.adaptive_audio_server:
-            # Start all speakers at current volume levels
-            global_time = time.time()
-            commands = []
-            with self._volumes_lock:
-                for speaker_id, volume in self.volumes.items():
-                    # Start command
-                    start_cmd = {
-                        'command': 'start',
-                        'execute_time': global_time + 0.5,
-                        'rpi_id': speaker_id,
-                        'volume': None
-                    }
-                    # Volume command
-                    vol_cmd = {
-                        'command': 'volume',
-                        'execute_time': global_time + 0.6,
-                        'rpi_id': speaker_id,
-                        'volume': volume
-                    }
-                    commands.extend([start_cmd, vol_cmd])
-            self._publish_commands(commands)
+            self.adaptive_audio_server.start_all()
         logger.info(json.dumps({"event": "play_requested"}))
     
     def pause(self):
         """Pause playback."""
         if self.adaptive_audio_server:
-            global_time = time.time()
-            pause_state = self.adaptive_audio_server.compute_pause_all_state(global_time)
-            self._publish_commands(pause_state['commands'])
+            self.adaptive_audio_server.pause_all()
         logger.info(json.dumps({"event": "pause_requested"}))
     
     def stop_playback(self):
         """Stop playback."""
-        self.pause()  # Same as pause for now
+        if self.adaptive_audio_server:
+            self.adaptive_audio_server.pause_all()
         logger.info(json.dumps({"event": "stop_playback_requested"}))
     
     def skip_track(self):
         """Skip to next track."""
-        if self.adaptive_audio_server:
-            new_song = self.adaptive_audio_server.next_song()
-            logger.info(json.dumps({"event": "skip_track_requested", "new_song": new_song}))
-        else:
-            # Fallback: simulate track skipping by updating track counter
-            self.current_track_index += 1
-            logger.info(json.dumps({"event": "skip_track_requested", "new_index": self.current_track_index}))
+        # TODO: Implement track skipping in audio server
+        logger.info(json.dumps({"event": "skip_track_requested"}))
     
     def previous_track(self):
         """Go to previous track."""
-        if self.adaptive_audio_server:
-            new_song = self.adaptive_audio_server.previous_song()
-            logger.info(json.dumps({"event": "previous_track_requested", "new_song": new_song}))
-        else:
-            # Fallback: simulate previous track by updating track counter
-            self.current_track_index = max(0, self.current_track_index - 1)
-            logger.info(json.dumps({"event": "previous_track_requested", "new_index": self.current_track_index}))
+        # TODO: Implement previous track in audio server
+        logger.info(json.dumps({"event": "previous_track_requested"}))
     
     def seek(self, position: float):
         """Seek to position in current track."""
-        # Store seek position for future use
-        self.current_seek_position = max(0.0, min(1.0, position))
-        logger.info(json.dumps({"event": "seek_requested", "position": self.current_seek_position}))
+        # TODO: Implement seeking in audio server
+        logger.info(json.dumps({"event": "seek_requested", "position": position}))
     
     # ================================================================
     # AUDIO STATE QUERY METHODS
@@ -578,41 +483,31 @@ class ServerBringUpProMax:
     
     def get_queue_preview(self, limit: int = 5) -> list:
         """Get preview of upcoming tracks."""
-        if self.adaptive_audio_server:
-            return self.adaptive_audio_server.get_queue_preview(limit)
-        # Fallback to playlist-based queue preview
-        return [f"Playlist {self.current_playlist} - Track {i+1}" for i in range(limit)]
+        # TODO: Implement queue preview in audio server
+        return [f"Track {i+1}" for i in range(limit)]
     
     def get_current_track(self) -> str:
         """Get current track name."""
-        if self.adaptive_audio_server:
-            return self.adaptive_audio_server.get_current_song()
-        # Fallback
-        return f"Playlist {self.current_playlist} - Track {self.current_track_index + 1}"
+        # TODO: Implement current track tracking in audio server
+        return "Current Track"
     
     def is_playing(self) -> bool:
         """Check if currently playing."""
-        return self._adaptive_audio_active.is_set() or self._zone_dj_active.is_set()
+        # TODO: Implement playing state tracking in audio server
+        return True
     
     def get_playback_progress(self) -> float:
         """Get playback progress 0.0-1.0."""
-        # Return current seek position or simulate progress
-        if hasattr(self, 'current_seek_position'):
-            return self.current_seek_position
-        # Simulate progress based on time if playing
-        if self.is_playing():
-            import time
-            return (time.time() % 60) / 60.0  # Cycle every minute
-        return 0.0
+        # TODO: Implement progress tracking in audio server
+        return 0.5  # Placeholder
     
     def get_speaker_states(self) -> Dict[int, dict]:
         """Get speaker states."""
-        volumes = self.get_speaker_volumes()
         states = {}
-        for speaker_id, volume in volumes.items():
+        for speaker_id, volume in self.volumes.items():
             states[speaker_id] = {
                 "volume": volume,
-                "playing": self.is_playing(),
+                "playing": True,
                 "connected": True
             }
         return states
@@ -623,48 +518,16 @@ class ServerBringUpProMax:
     
     def set_global_volume(self, volume: int):
         """Set volume for all speakers."""
-        clamped_volume = max(0, min(100, volume))
-        
-        # Update local tracking
-        with self._volumes_lock:
-            for speaker_id in self.volumes:
-                self.volumes[speaker_id] = clamped_volume
-        
-        # Send MQTT commands
-        if self.adaptive_audio_server:
-            global_time = time.time()
-            commands = []
-            for speaker_id in range(4):
-                cmd = {
-                    'command': 'volume',
-                    'execute_time': global_time + 0.5,
-                    'rpi_id': speaker_id,
-                    'volume': clamped_volume
-                }
-                commands.append(cmd)
-            self._publish_commands(commands)
-        logger.info(json.dumps({"event": "global_volume_set", "volume": clamped_volume}))
+        for speaker_id in self.volumes:
+            self.set_volume(speaker_id, volume)
+        logger.info(json.dumps({"event": "global_volume_set", "volume": volume}))
     
     def set_volume(self, device_id: int, volume: int):
         """Set volume for specific speaker."""
-        clamped_volume = max(0, min(100, volume))
-        
-        # Update local tracking
-        if device_id in range(4):
-            with self._volumes_lock:
-                self.volumes[device_id] = clamped_volume
-        
-        # Send MQTT command
-        if self.adaptive_audio_server:
-            global_time = time.time()
-            cmd = {
-                'command': 'volume',
-                'execute_time': global_time + 0.5,
-                'rpi_id': device_id,
-                'volume': clamped_volume
-            }
-            self._publish_commands([cmd])
-        logger.info(json.dumps({"event": "volume_set", "device_id": device_id, "volume": clamped_volume}))
+        if device_id in self.volumes:
+            self.volumes[device_id] = clamp(volume)
+            self._send_audio_command("volume", rpi_id=device_id, volume=volume)
+        logger.info(json.dumps({"event": "volume_set", "device_id": device_id, "volume": volume}))
     
     # ================================================================
     # AUDIO MODE CONTROL METHODS
@@ -673,45 +536,23 @@ class ServerBringUpProMax:
     def enable_adaptive_audio(self, enabled: bool):
         """Enable/disable adaptive audio mode."""
         if enabled:
-            self.adaptive_audio_start()
+            self.adaptive_audio_demo()
         else:
-            self.adaptive_audio_stop()
+            self.stop_adaptive_audio_demo()
         logger.info(json.dumps({"event": "adaptive_audio_enabled", "enabled": enabled}))
     
     def enable_zone_dj(self, enabled: bool):
         """Enable/disable zone DJ mode."""
         if enabled:
-            self.zone_dj_start()
+            self.zone_dj_demo()
         else:
-            self.zone_dj_stop()
+            self.stop_zone_dj_demo()
         logger.info(json.dumps({"event": "zone_dj_enabled", "enabled": enabled}))
     
     def bypass_audio_processing(self, bypass: bool):
         """Bypass audio processing."""
-        if bypass:
-            # Stop all audio processing
-            self.adaptive_audio_stop()
-            self.zone_dj_stop()
+        # TODO: Implement bypass functionality in audio server
         logger.info(json.dumps({"event": "bypass_audio_processing", "bypass": bypass}))
-    
-    # Alias methods for compatibility with main_demo.py
-    def adaptive_audio_demo(self):
-        """Alias for adaptive_audio_start()."""
-        self.adaptive_audio_start()
-    
-    def stop_adaptive_audio_demo(self):
-        """Alias for adaptive_audio_stop()."""
-        self.adaptive_audio_stop()
-    
-    def zone_dj_demo(self):
-        """Alias for zone_dj_start()."""
-        self.zone_dj_start()
-    
-    def stop_zone_dj_demo(self):
-        """Alias for zone_dj_stop()."""
-        self.zone_dj_stop()
-
-
 
 if __name__ == "__main__":
     import argparse

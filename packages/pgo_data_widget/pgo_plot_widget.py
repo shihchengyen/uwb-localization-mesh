@@ -18,7 +18,10 @@ from collections import deque
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QFileDialog, QMessageBox)
 from PyQt5.QtCore import QTimer
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+try:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+except ImportError:
+    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
@@ -45,7 +48,7 @@ class PgoPlotWidget(QWidget):
         self.bus = app_bus
         self.settings = settings
         
-        # Configuration
+        # Configuration - Updated for corrected coordinate system (480x600)
         self.world_width_m = settings.value("world/width_m", 4.80, type=float)
         self.world_height_m = settings.value("world/height_m", 6.00, type=float)
         self.grid_cols = settings.value("grid/cols", 8, type=int)
@@ -182,8 +185,7 @@ class PgoPlotWidget(QWidget):
         self.ax.set_xlim(0, self.world_width_m)
         self.ax.set_ylim(0, self.world_height_m)
         
-        # Invert Y-axis (world coordinates increase downward)
-        self.ax.invert_yaxis()
+        # No Y-axis inversion needed - coordinate system has origin at bottom-left
         
         # Labels
         self.ax.set_xlabel('X (meters)', color='#000000')

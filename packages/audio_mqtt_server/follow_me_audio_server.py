@@ -245,11 +245,11 @@ class AdaptiveAudioServer:
         x = float(position[0])
         y = float(position[1])
 
-        # Pair by Y threshold
-        pair = "back" if y >= 300.0 else "front"
+        # Pair by Y threshold - updated for new coordinate system (600x480)
+        pair = "back" if y >= 240.0 else "front"
 
-        # Pan by X around center x == 240
-        center_x = 240.0
+        # Pan by X around center x == 300 (center of 600-wide space)
+        center_x = 300.0
         delta = x - center_x  # >0 → right; <0 → left
 
         base = 70.0

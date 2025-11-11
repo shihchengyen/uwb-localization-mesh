@@ -94,10 +94,10 @@ class ZoneDjWidget(QWidget):
             # Create new instance if no shared floorplan provided
             from viz_floorplan.floorplan_view import FloorplanView
             self.floorplan = FloorplanView(
-                world_width_m=self.settings.value("world/width_m", 4.80, type=float),
-                world_height_m=self.settings.value("world/height_m", 6.00, type=float),
-                grid_cols=self.settings.value("grid/cols", 8, type=int),
-                grid_rows=self.settings.value("grid/rows", 10, type=int),
+                world_width_m=self.settings.value("world/width_m", 6.00, type=float),
+                world_height_m=self.settings.value("world/height_m", 4.80, type=float),
+                grid_cols=self.settings.value("grid/cols", 10, type=int),
+                grid_rows=self.settings.value("grid/rows", 8, type=int),
                 default_zone_radius_m=self.default_zone_radius_m,
                 parent=self
             )
@@ -330,6 +330,19 @@ class ZoneDjWidget(QWidget):
             # For circular zones, use center point
             zone_x = zone.x
             zone_y = zone.y
+        
+        # Auto-set playlist based on zone's assigned playlist
+        if hasattr(zone, 'playlist'):
+            playlist_id = zone.playlist
+            print(f"[ZoneDjWidget] Zone {zone.id} registered, switching to playlist {playlist_id}")
+            # Direct access to server for playlist setting
+            if self.server and hasattr(self.server, 'set_playlist'):
+                self.server.set_playlist(playlist_id)
+            else:
+                # Fallback to AppBus if server not available
+                self.bus.playlistChangeRequested.emit(playlist_id)
+            
+            # Note: Mini player dropdown was removed as requested, playlist change is handled by server
         
         # Emit to AppBus for logging/cross-widget communication
         self.bus.zoneRegistered.emit(zone.id, zone_x, zone_y, time.time(), "zone_dj_widget")
