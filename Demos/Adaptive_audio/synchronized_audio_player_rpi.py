@@ -26,8 +26,7 @@ DEFAULT_BROKER_PORT = 1884
 DEFAULT_USERNAME = "laptop"
 DEFAULT_PASSWORD = "laptop"
 # ====================================
-
-
+# to execute: uv run Demos/Adaptive_audio/synchronized_audio_player_rpi.py --id 0 --broker 192.168.68.65 
 class RPiAudioPlayer:
     def __init__(self, rpi_id: int, wav_file: str, broker_ip: str = DEFAULT_BROKER_IP):
         self.rpi_id = rpi_id
