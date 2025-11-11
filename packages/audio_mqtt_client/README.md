@@ -38,6 +38,7 @@ Configured for Raspberry Pi 3.5mm headphone jack:
 - `start`: Start playing audio (loops forever)
 - `pause`: Pause audio
 - `volume`: Set volume (0-100)
+- `load_track`: Load and switch to a new audio file
 
 ## MQTT Subscriptions
 

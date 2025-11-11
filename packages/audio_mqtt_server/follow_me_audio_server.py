@@ -67,13 +67,13 @@ class AdaptiveAudioServer:
         self.volumes = {0: 70, 1: 70, 2: 70, 3: 70}
         self._last_position: Optional[np.ndarray] = None
         
-        # Song queue management
+        # Song queue management - using audio_files directory
         self.song_queue = [
-            "crazy-carls-brickhouse-tavern.wav",
-            "funky-bossanova-guitar.wav", 
-            "guitar-on-loop.mp3",
-            "Track 4 - Playlist 1",
-            "Track 5 - Playlist 1"
+            "audio_files/crazy-carls-brickhouse-tavern.wav",
+            "audio_files/funky-bossanova-guitar.wav", 
+            "audio_files/guitar-on-loop.mp3",
+            "audio_files/track-4-playlist-1.wav",
+            "audio_files/track-5-playlist-1.wav"
         ]
         self.current_track_index = 0
         self.current_playlist = 1
@@ -344,6 +344,39 @@ class AdaptiveAudioServer:
             return self.song_queue[self.current_track_index]
         return "No songs in queue"
     
+    def get_load_track_commands(self, global_time: float, execute_delay_ms: int = 500) -> dict:
+        """
+        Generate load_track commands for all speakers to switch to current song.
+        
+        Args:
+            global_time: Current global time
+            execute_delay_ms: Delay before execution (default 500ms)
+            
+        Returns:
+            Dict with commands to load current track on all speakers
+        """
+        if not self.song_queue or self.current_track_index >= len(self.song_queue):
+            return {'commands': []}
+        
+        current_track = self.song_queue[self.current_track_index]
+        execute_time = global_time + (execute_delay_ms / 1000.0)
+        
+        # Generate load_track command for all speakers
+        commands = []
+        for rpi_id in [0, 1, 2, 3]:
+            commands.append({
+                'command': 'load_track',
+                'rpi_id': rpi_id,
+                'track_file': current_track,
+                'execute_time': execute_time
+            })
+        
+        return {
+            'commands': commands,
+            'current_track': current_track,
+            'track_index': self.current_track_index
+        }
+    
     def previous_song(self) -> str:
         """
         Go to the previous song in the queue.
@@ -377,55 +410,55 @@ class AdaptiveAudioServer:
         """
         self.current_playlist = playlist_number
         
-        # Update song queue based on playlist
+        # Update song queue based on playlist - using audio_files directory
         if playlist_number == 1:
             self.song_queue = [
-                "crazy-carls-brickhouse-tavern.wav",
-                "funky-bossanova-guitar.wav", 
-                "guitar-on-loop.mp3",
-                "Track 4 - Playlist 1",
-                "Track 5 - Playlist 1"
+                "audio_files/crazy-carls-brickhouse-tavern.wav",
+                "audio_files/funky-bossanova-guitar.wav", 
+                "audio_files/guitar-on-loop.mp3",
+                "audio_files/track-4-playlist-1.wav",
+                "audio_files/track-5-playlist-1.wav"
             ]
         elif playlist_number == 2:
             self.song_queue = [
-                "Track 1 - Playlist 2",
-                "Track 2 - Playlist 2",
-                "Track 3 - Playlist 2",
-                "Track 4 - Playlist 2",
-                "Track 5 - Playlist 2"
+                "audio_files/track-1-playlist-2.wav",
+                "audio_files/track-2-playlist-2.wav",
+                "audio_files/track-3-playlist-2.wav",
+                "audio_files/track-4-playlist-2.wav",
+                "audio_files/track-5-playlist-2.wav"
             ]
         elif playlist_number == 3:
             self.song_queue = [
-                "Track 1 - Playlist 3",
-                "Track 2 - Playlist 3",
-                "Track 3 - Playlist 3",
-                "Track 4 - Playlist 3",
-                "Track 5 - Playlist 3"
+                "audio_files/track-1-playlist-3.wav",
+                "audio_files/track-2-playlist-3.wav",
+                "audio_files/track-3-playlist-3.wav",
+                "audio_files/track-4-playlist-3.wav",
+                "audio_files/track-5-playlist-3.wav"
             ]
         elif playlist_number == 4:
             self.song_queue = [
-                "Track 1 - Playlist 4",
-                "Track 2 - Playlist 4",
-                "Track 3 - Playlist 4",
-                "Track 4 - Playlist 4",
-                "Track 5 - Playlist 4"
+                "audio_files/track-1-playlist-4.wav",
+                "audio_files/track-2-playlist-4.wav",
+                "audio_files/track-3-playlist-4.wav",
+                "audio_files/track-4-playlist-4.wav",
+                "audio_files/track-5-playlist-4.wav"
             ]
         elif playlist_number == 5:
             self.song_queue = [
-                "Track 1 - Playlist 5",
-                "Track 2 - Playlist 5",
-                "Track 3 - Playlist 5",
-                "Track 4 - Playlist 5",
-                "Track 5 - Playlist 5"
+                "audio_files/track-1-playlist-5.wav",
+                "audio_files/track-2-playlist-5.wav",
+                "audio_files/track-3-playlist-5.wav",
+                "audio_files/track-4-playlist-5.wav",
+                "audio_files/track-5-playlist-5.wav"
             ]
         else:
             # Default to playlist 1
             self.song_queue = [
-                "crazy-carls-brickhouse-tavern.wav",
-                "funky-bossanova-guitar.wav", 
-                "guitar-on-loop.mp3",
-                "Track 4 - Playlist 1",
-                "Track 5 - Playlist 1"
+                "audio_files/crazy-carls-brickhouse-tavern.wav",
+                "audio_files/funky-bossanova-guitar.wav", 
+                "audio_files/guitar-on-loop.mp3",
+                "audio_files/track-4-playlist-1.wav",
+                "audio_files/track-5-playlist-1.wav"
             ]
         
         # Reset to first track
