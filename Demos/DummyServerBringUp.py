@@ -69,13 +69,13 @@ class DummyServerBringUpProMax:
     ):
         """Initialize the dummy server with configuration."""
 
-        # Ground truth anchor positions (cm)
+        # Ground truth anchor positions (cm) - Consistent with Basic_render_graph
         # Anchors are mounted at 239 cm (2.39m) height
         self.true_nodes = {
             0: np.array([480, 600, 0]),  # top-right
             1: np.array([0, 600, 0]),    # top-left
             2: np.array([480, 0, 0]),    # bottom-right
-            3: np.array([0, 0, 0])       # bottom-left (origin in XY, but at sensor height in Z)
+            3: np.array([0, 0, 0])       # bottom-left (origin)
         }
 
         # Working copy of nodes that can be jittered (jittering temporarily disabled)
@@ -146,13 +146,13 @@ class DummyServerBringUpProMax:
         Generate a simulated user position that moves around the space.
         Returns position in cm as [x, y, z].
         """
-        # Space dimensions: 480cm x 600cm (4.8m x 6m)
+        # Space dimensions: 480cm x 600cm (4.8m x 6m) - consistent with Basic_render_graph
         # Create a figure-8 pattern that covers the space
         scale_t = t * self.simulation_speed * 0.5  # Adjust speed
 
         # Figure-8 pattern parameters
-        a = 200  # Width of figure-8 (cm)
-        b = 150  # Height of figure-8 (cm)
+        a = 180  # Width of figure-8 (cm) - adjusted for 480cm width
+        b = 220  # Height of figure-8 (cm) - adjusted for 600cm height
 
         # Center the pattern in the space
         center_x = 240  # Center of 480cm width
@@ -166,8 +166,8 @@ class DummyServerBringUpProMax:
         z = 0.0
 
         # Ensure we stay within bounds with some margin
-        x = np.clip(x, 50, 430)  # 50cm margin from edges
-        y = np.clip(y, 50, 550)  # 50cm margin from edges
+        x = np.clip(x, 50, 430)  # 50cm margin from edges (480-50=430)
+        y = np.clip(y, 50, 550)  # 50cm margin from edges (600-50=550)
 
         return np.array([x, y, z])
 
@@ -446,6 +446,143 @@ class DummyServerBringUpProMax:
             # Convert from cm to meters
             positions[speaker_id] = pos_cm / 100.0
         return positions
+    
+    # ================================================================
+    # PLAYBACK CONTROL METHODS (Dummy implementations)
+    # ================================================================
+    
+    def play(self):
+        """Start playback (dummy implementation)."""
+        logger.info(json.dumps({
+            "event": "dummy_play_requested",
+            "dummy_mode": True
+        }))
+    
+    def pause(self):
+        """Pause playback (dummy implementation)."""
+        logger.info(json.dumps({
+            "event": "dummy_pause_requested",
+            "dummy_mode": True
+        }))
+    
+    def stop_playback(self):
+        """Stop playback (dummy implementation)."""
+        logger.info(json.dumps({
+            "event": "dummy_stop_playback_requested",
+            "dummy_mode": True
+        }))
+    
+    def skip_track(self):
+        """Skip to next track (dummy implementation)."""
+        logger.info(json.dumps({
+            "event": "dummy_skip_track_requested",
+            "dummy_mode": True
+        }))
+    
+    def previous_track(self):
+        """Go to previous track (dummy implementation)."""
+        logger.info(json.dumps({
+            "event": "dummy_previous_track_requested",
+            "dummy_mode": True
+        }))
+    
+    def seek(self, position: float):
+        """Seek to position in current track (dummy implementation)."""
+        logger.info(json.dumps({
+            "event": "dummy_seek_requested",
+            "position": position,
+            "dummy_mode": True
+        }))
+    
+    # ================================================================
+    # AUDIO STATE QUERY METHODS (Dummy implementations)
+    # ================================================================
+    
+    def get_queue_preview(self, limit: int = 5) -> list:
+        """Get preview of upcoming tracks (dummy implementation)."""
+        return [f"Track {i+1}" for i in range(limit)]
+    
+    def get_current_track(self) -> str:
+        """Get current track name (dummy implementation)."""
+        return "Dummy Track"
+    
+    def is_playing(self) -> bool:
+        """Check if currently playing (dummy implementation)."""
+        return True  # Always "playing" in dummy mode
+    
+    def get_playback_progress(self) -> float:
+        """Get playback progress 0.0-1.0 (dummy implementation)."""
+        # Return a cycling progress based on simulation time
+        sim_time = time.time() - self._simulation_start_time
+        return (sim_time * self.simulation_speed) % 1.0
+    
+    def get_speaker_states(self) -> Dict[int, dict]:
+        """Get speaker states (dummy implementation)."""
+        states = {}
+        volumes = self.get_speaker_volumes()
+        for speaker_id, volume in volumes.items():
+            states[speaker_id] = {
+                "volume": volume,
+                "playing": True,
+                "connected": True
+            }
+        return states
+    
+    # ================================================================
+    # VOLUME CONTROL METHODS (Dummy implementations)
+    # ================================================================
+    
+    def set_global_volume(self, volume: int):
+        """Set volume for all speakers (dummy implementation)."""
+        if hasattr(self, 'volumes') and self.volumes:
+            with self._volumes_lock:
+                for speaker_id in self.volumes:
+                    self.volumes[speaker_id] = max(0, min(100, volume))
+        logger.info(json.dumps({
+            "event": "dummy_global_volume_set",
+            "volume": volume,
+            "dummy_mode": True
+        }))
+    
+    def set_volume(self, device_id: int, volume: int):
+        """Set volume for specific speaker (dummy implementation)."""
+        if hasattr(self, 'volumes') and self.volumes and device_id in self.volumes:
+            with self._volumes_lock:
+                self.volumes[device_id] = max(0, min(100, volume))
+        logger.info(json.dumps({
+            "event": "dummy_volume_set",
+            "device_id": device_id,
+            "volume": volume,
+            "dummy_mode": True
+        }))
+    
+    # ================================================================
+    # AUDIO MODE CONTROL METHODS (Dummy implementations)
+    # ================================================================
+    
+    def enable_adaptive_audio(self, enabled: bool):
+        """Enable/disable adaptive audio mode (dummy implementation)."""
+        logger.info(json.dumps({
+            "event": "dummy_adaptive_audio_enabled",
+            "enabled": enabled,
+            "dummy_mode": True
+        }))
+    
+    def enable_zone_dj(self, enabled: bool):
+        """Enable/disable zone DJ mode (dummy implementation)."""
+        logger.info(json.dumps({
+            "event": "dummy_zone_dj_enabled",
+            "enabled": enabled,
+            "dummy_mode": True
+        }))
+    
+    def bypass_audio_processing(self, bypass: bool):
+        """Bypass audio processing (dummy implementation)."""
+        logger.info(json.dumps({
+            "event": "dummy_bypass_audio_processing",
+            "bypass": bypass,
+            "dummy_mode": True
+        }))
 
 if __name__ == "__main__":
     import argparse

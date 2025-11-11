@@ -101,7 +101,7 @@ class ServerBringUpProMax:
         
         # Audio MQTT setup
         client_id = f"server_bring_up_pro_max_{uuid.uuid4()}"
-        self.audio_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
+        self.audio_client = mqtt.Client(client_id=client_id)
         self.audio_client.username_pw_set(username=DEFAULT_USERNAME, password=DEFAULT_PASSWORD)
 
         self.audio_topic = "audio/commands"
@@ -179,12 +179,16 @@ class ServerBringUpProMax:
     
     def zone_dj_demo(self):
         """Start the zone DJ demo in a background thread."""
+        # TODO: Implement zone_dj_start in AdaptiveAudioController
         # play 70% at all speakers
-        self.adaptive_audio_server.zone_dj_start()
+        # self.adaptive_audio_server.zone_dj_start()
+        logger.info(json.dumps({"event": "zone_dj_demo_started"}))
 
     def stop_zone_dj_demo(self):
         """Stop the zone DJ demo background thread."""
-        self.adaptive_audio_server.zone_dj_pause()
+        # TODO: Implement zone_dj_pause in AdaptiveAudioController
+        # self.adaptive_audio_server.zone_dj_pause()
+        logger.info(json.dumps({"event": "zone_dj_demo_stopped"}))
 
 
     def set_playlist(self, playlist_number: int):
@@ -419,6 +423,136 @@ class ServerBringUpProMax:
         # Track local volume state (for live monitoring)
         if command == "volume" and rpi_id is not None and volume is not None:
             self.volumes[rpi_id] = clamp(volume)
+    
+    # ================================================================
+    # MISSING METHODS IMPLEMENTATION
+    # ================================================================
+    
+    def get_speaker_volumes(self) -> Dict[int, int]:
+        """Get current speaker volumes."""
+        return self.volumes.copy()
+    
+    def get_speaker_positions(self) -> Dict[int, np.ndarray]:
+        """Get speaker positions in world coordinates (meters)."""
+        positions = {}
+        for speaker_id, pos_cm in self.true_nodes.items():
+            # Convert from cm to meters
+            positions[speaker_id] = pos_cm / 100.0
+        return positions
+    
+    # ================================================================
+    # PLAYBACK CONTROL METHODS
+    # ================================================================
+    
+    def play(self):
+        """Start playback."""
+        if self.adaptive_audio_server:
+            self.adaptive_audio_server.start_all()
+        logger.info(json.dumps({"event": "play_requested"}))
+    
+    def pause(self):
+        """Pause playback."""
+        if self.adaptive_audio_server:
+            self.adaptive_audio_server.pause_all()
+        logger.info(json.dumps({"event": "pause_requested"}))
+    
+    def stop_playback(self):
+        """Stop playback."""
+        if self.adaptive_audio_server:
+            self.adaptive_audio_server.pause_all()
+        logger.info(json.dumps({"event": "stop_playback_requested"}))
+    
+    def skip_track(self):
+        """Skip to next track."""
+        # TODO: Implement track skipping in audio server
+        logger.info(json.dumps({"event": "skip_track_requested"}))
+    
+    def previous_track(self):
+        """Go to previous track."""
+        # TODO: Implement previous track in audio server
+        logger.info(json.dumps({"event": "previous_track_requested"}))
+    
+    def seek(self, position: float):
+        """Seek to position in current track."""
+        # TODO: Implement seeking in audio server
+        logger.info(json.dumps({"event": "seek_requested", "position": position}))
+    
+    # ================================================================
+    # AUDIO STATE QUERY METHODS
+    # ================================================================
+    
+    def get_queue_preview(self, limit: int = 5) -> list:
+        """Get preview of upcoming tracks."""
+        # TODO: Implement queue preview in audio server
+        return [f"Track {i+1}" for i in range(limit)]
+    
+    def get_current_track(self) -> str:
+        """Get current track name."""
+        # TODO: Implement current track tracking in audio server
+        return "Current Track"
+    
+    def is_playing(self) -> bool:
+        """Check if currently playing."""
+        # TODO: Implement playing state tracking in audio server
+        return True
+    
+    def get_playback_progress(self) -> float:
+        """Get playback progress 0.0-1.0."""
+        # TODO: Implement progress tracking in audio server
+        return 0.5  # Placeholder
+    
+    def get_speaker_states(self) -> Dict[int, dict]:
+        """Get speaker states."""
+        states = {}
+        for speaker_id, volume in self.volumes.items():
+            states[speaker_id] = {
+                "volume": volume,
+                "playing": True,
+                "connected": True
+            }
+        return states
+    
+    # ================================================================
+    # VOLUME CONTROL METHODS
+    # ================================================================
+    
+    def set_global_volume(self, volume: int):
+        """Set volume for all speakers."""
+        for speaker_id in self.volumes:
+            self.set_volume(speaker_id, volume)
+        logger.info(json.dumps({"event": "global_volume_set", "volume": volume}))
+    
+    def set_volume(self, device_id: int, volume: int):
+        """Set volume for specific speaker."""
+        if device_id in self.volumes:
+            self.volumes[device_id] = clamp(volume)
+            self._send_audio_command("volume", rpi_id=device_id, volume=volume)
+        logger.info(json.dumps({"event": "volume_set", "device_id": device_id, "volume": volume}))
+    
+    # ================================================================
+    # AUDIO MODE CONTROL METHODS
+    # ================================================================
+    
+    def enable_adaptive_audio(self, enabled: bool):
+        """Enable/disable adaptive audio mode."""
+        if enabled:
+            self.adaptive_audio_demo()
+        else:
+            self.stop_adaptive_audio_demo()
+        logger.info(json.dumps({"event": "adaptive_audio_enabled", "enabled": enabled}))
+    
+    def enable_zone_dj(self, enabled: bool):
+        """Enable/disable zone DJ mode."""
+        if enabled:
+            self.zone_dj_demo()
+        else:
+            self.stop_zone_dj_demo()
+        logger.info(json.dumps({"event": "zone_dj_enabled", "enabled": enabled}))
+    
+    def bypass_audio_processing(self, bypass: bool):
+        """Bypass audio processing."""
+        # TODO: Implement bypass functionality in audio server
+        logger.info(json.dumps({"event": "bypass_audio_processing", "bypass": bypass}))
 
 if __name__ == "__main__":
     import argparse

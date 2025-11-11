@@ -96,24 +96,79 @@ def _start_server_bringup(use_dummy=False, settings=None, simulation_speed=None)
         
             return None
     else:
-        # Try real server first
+        # Try real server options (prioritize Server_bring_up_with_Audio.py)
         try:
-            import ServerBringUp
-            sb = ServerBringUp.ServerBringUp()
+            # Try Server_bring_up_with_Audio.py (Full ServerBringUpProMax with advanced audio)
+            import sys
+            import os
+            repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            if repo_root not in sys.path:
+                sys.path.insert(0, repo_root)
+            
+            from Server_bring_up_with_Audio import ServerBringUpProMax
+            from packages.uwb_mqtt_server.config import MQTTConfig
+            
+            # Create MQTT config with defaults
+            mqtt_config = MQTTConfig(
+                broker="localhost",
+                port=1884,
+                username="laptop", 
+                password="laptop"
+            )
+            
+            sb = ServerBringUpProMax(mqtt_config=mqtt_config)
             if hasattr(sb, "start"):
                 sb.start()
+            print("[UnifiedDemo] Started ServerBringUpProMax (full audio pipeline)")
             return sb
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[UnifiedDemo] ServerBringUpProMax (full audio) failed: {e}")
+        
         try:
-            from Demos.ServerBringUp import ServerBringUp
-            sb = ServerBringUp()
+            # Fallback: Try demo_server_bring_up.py (DEPRECATED - basic audio)
+            from demo_server_bring_up import ServerBringUpProMax
+            from packages.uwb_mqtt_server.config import MQTTConfig
+            
+            mqtt_config = MQTTConfig(
+                broker="localhost",
+                port=1884,
+                username="laptop",
+                password="laptop"
+            )
+            
+            sb = ServerBringUpProMax(mqtt_config=mqtt_config)
             if hasattr(sb, "start"):
                 sb.start()
+            print("[UnifiedDemo] ⚠️  Started ServerBringUpProMax (DEPRECATED - basic audio)")
+            print("[UnifiedDemo] ⚠️  Consider using Server_bring_up_with_Audio.py for full features")
             return sb
-        except Exception:
-            print("[UnifiedDemo] ServerBringUp not found. Use --dummy flag for simulation.")
-            return None
+        except Exception as e:
+            print(f"[UnifiedDemo] ServerBringUpProMax (deprecated) failed: {e}")
+        
+        try:
+            # Last resort: Try Server_bring_up.py (basic ServerBringUp - no audio)
+            from Server_bring_up import ServerBringUp
+            from packages.uwb_mqtt_server.config import MQTTConfig
+            
+            mqtt_config = MQTTConfig(
+                broker="localhost",
+                port=1884,
+                username="laptop",
+                password="laptop"
+            )
+            
+            sb = ServerBringUp(mqtt_config=mqtt_config)
+            if hasattr(sb, "start"):
+                sb.start()
+            print("[UnifiedDemo] Started ServerBringUp (basic version - no audio)")
+            return sb
+        except Exception as e:
+            print(f"[UnifiedDemo] ServerBringUp (basic) failed: {e}")
+            
+        print("[UnifiedDemo] No real server found. Use --dummy flag for simulation.")
+        print("[UnifiedDemo] Make sure MQTT broker is running on localhost:1884")
+        print("[UnifiedDemo] Recommended: Use Server_bring_up_with_Audio.py for full functionality")
+        return None
 
 def _load_pgo_widget(app_bus, services, settings):
     try:
@@ -227,6 +282,9 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Server Error", 
                                "Failed to start server. Use --dummy flag for simulation.")
             return
+
+        # Add server to services for direct access by widgets
+        self.services["server"] = self.server
 
         # Connect AppBus signals to server methods (routing layer)
         self._connect_appbus_signals()
@@ -372,12 +430,8 @@ class MainWindow(QMainWindow):
         """Handle tab change - reparent shared floorplan to active widget and update toolbar."""
         current_widget = self.tabs.currentWidget()
         
-        # Clear Adaptive Audio zones when switching away from Adaptive Audio tab
-        if hasattr(self, 'tab_adaptive') and current_widget != self.tab_adaptive:
-            if hasattr(self.tab_adaptive, 'clear_adaptive_zones'):
-                self.tab_adaptive.clear_adaptive_zones()
-        # Recreate Adaptive Audio zones when switching to Adaptive Audio tab
-        elif current_widget == self.tab_adaptive:
+        # Handle tab switching for Adaptive Audio (no zones needed anymore)
+        if current_widget == self.tab_adaptive:
             # Enable speaker visualization for Adaptive Audio
             if hasattr(self, 'shared_floorplan') and self.shared_floorplan:
                 self.shared_floorplan.set_show_speakers(True)
@@ -386,15 +440,6 @@ class MainWindow(QMainWindow):
                     positions = self.server.get_speaker_positions()
                     if positions:
                         self.shared_floorplan.set_speaker_positions(positions)
-            
-            if hasattr(self.tab_adaptive, '_setup_adaptive_zones'):
-                # Only recreate if zones don't exist and homography is available
-                if (not hasattr(self.tab_adaptive, 'adaptive_zones') or 
-                    not self.tab_adaptive.adaptive_zones):
-                    if (hasattr(self, 'shared_floorplan') and 
-                        self.shared_floorplan and 
-                        self.shared_floorplan.homography_matrix is not None):
-                        self.tab_adaptive._setup_adaptive_zones()
         else:
             # Disable speaker visualization for other tabs
             if hasattr(self, 'shared_floorplan') and self.shared_floorplan:
@@ -672,9 +717,69 @@ class MainWindow(QMainWindow):
         # same directory as this file, /assets/floorplans
         here = os.path.abspath(os.path.dirname(__file__))
         return os.path.join(here, "assets", "floorplans")
+    
+    def _center_default_floorplan(self):
+        """Center the default floorplan in the new coordinate system."""
+        if not hasattr(self, 'shared_floorplan') or not self.shared_floorplan:
+            return
+        
+        try:
+            # Get image dimensions
+            if not self.shared_floorplan.image_path:
+                return
+            
+            import cv2
+            img = cv2.imread(self.shared_floorplan.image_path)
+            if img is None:
+                return
+            
+            h, w = img.shape[:2]
+            
+            # Calculate centered corners for the new 600x480 coordinate system
+            # Center the image within the world bounds
+            margin_x = 0.1 * w  # 10% margin
+            margin_y = 0.1 * h  # 10% margin
+            
+            centered_corners = [
+                (margin_x, margin_y),              # Top-left
+                (w - margin_x, margin_y),          # Top-right  
+                (w - margin_x, h - margin_y),      # Bottom-right
+                (margin_x, h - margin_y)           # Bottom-left
+            ]
+            
+            # Set corners and compute homography
+            self.shared_floorplan.corners = centered_corners
+            if self.shared_floorplan._compute_homography():
+                print(f"[MainWindow] Centered floorplan with corners: {centered_corners}")
+            else:
+                print("[MainWindow] Failed to compute homography for centered floorplan")
+                
+        except Exception as e:
+            print(f"[MainWindow] Error centering floorplan: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _default_load_floorplan(self):
         """Load default floorplan into shared instance (called on startup)."""
+        # First try to load the specific floorplan.JPG
+        here = os.path.abspath(os.path.dirname(__file__))
+        repo_root = os.path.abspath(os.path.join(here, "..", ".."))
+        specific_floorplan = os.path.join(repo_root, "packages", "viz_floorplan", "assets", "floorplan.JPG")
+        
+        if os.path.exists(specific_floorplan):
+            # Load the specific floorplan.JPG
+            if hasattr(self, 'shared_floorplan') and self.shared_floorplan:
+                try:
+                    ok = self.shared_floorplan.load_image(specific_floorplan)
+                    if ok:
+                        # Auto-center the floorplan for the new coordinate system
+                        self._center_default_floorplan()
+                        self.statusBar().showMessage(f"Loaded default floorplan: {os.path.basename(specific_floorplan)} (centered)")
+                        return
+                except Exception as e:
+                    self.statusBar().showMessage(f"Failed to load specific floorplan: {e}")
+        
+        # Fallback to original behavior
         candidates = []
         fdir = self._default_floorplan_dir()
         for ext in ("*.png", "*.jpg", "*.jpeg", "*.bmp"):
@@ -688,7 +793,9 @@ class MainWindow(QMainWindow):
             try:
                 ok = self.shared_floorplan.load_image(img)
                 if ok:
-                    self.statusBar().showMessage(f"Loaded floorplan: {os.path.basename(img)}")
+                    # Auto-center the fallback floorplan as well
+                    self._center_default_floorplan()
+                    self.statusBar().showMessage(f"Loaded floorplan: {os.path.basename(img)} (centered)")
             except Exception as e:
                 self.statusBar().showMessage(f"Failed to load default image: {e}")
     

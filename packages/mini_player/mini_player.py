@@ -106,42 +106,11 @@ class MiniPlayer(QWidget):
         title_layout.addWidget(self.track_title_label, stretch=1)
         track_display.addLayout(title_layout)
         
-        # Album name
-        self.track_album_label = QLabel("Album Name")
-        font_album = QFont()
-        font_album.setPointSize(10)
-        self.track_album_label.setFont(font_album)
-        self.track_album_label.setStyleSheet("color: #000000;")
-        track_display.addWidget(self.track_album_label)
-        
-        # Time display
-        self.track_time_label = QLabel("3:45 / 5:23")
-        font_time = QFont()
-        font_time.setPointSize(10)
-        self.track_time_label.setFont(font_time)
-        self.track_time_label.setStyleSheet("color: #888888;")
-        track_display.addWidget(self.track_time_label)
+        # Remove album name and time display as requested
         
         layout.addLayout(track_display)
         
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 1000)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setFixedHeight(4)
-        layout.addWidget(self.progress_bar)
-        
-        # Progress time labels (current / total)
-        progress_time_layout = QHBoxLayout()
-        self.progress_current_label = QLabel("3:45")
-        self.progress_current_label.setStyleSheet("font-size: 9pt; color: #888888;")
-        progress_time_layout.addWidget(self.progress_current_label)
-        progress_time_layout.addStretch()
-        self.progress_total_label = QLabel("5:23")
-        self.progress_total_label.setStyleSheet("font-size: 9pt; color: #888888;")
-        progress_time_layout.addWidget(self.progress_total_label)
-        layout.addLayout(progress_time_layout)
+        # Remove progress bar and time labels as requested
         
         # Playback controls (Previous | Play/Pause | Next) - simplified
         controls_layout = QHBoxLayout()
@@ -218,25 +187,7 @@ class MiniPlayer(QWidget):
         
         layout.addLayout(volume_group)
         
-        # Playlist selector (icon + dropdown)
-        playlist_layout = QHBoxLayout()
-        playlist_layout.setSpacing(8)
-        playlist_icon = QLabel("|||")  # Vertical bars icon (simplified)
-        playlist_icon.setStyleSheet("font-size: 12pt; color: #000000;")
-        playlist_layout.addWidget(playlist_icon)
-        
-        self.playlist_combo = QComboBox()
-        self.playlist_combo.addItems([
-            "Playlist 1",
-            "Playlist 2",
-            "Playlist 3",
-            "Playlist 4",
-            "Playlist 5"
-        ])
-        self.playlist_combo.currentIndexChanged.connect(lambda idx: self.playlistSelected.emit(idx + 1))
-        playlist_layout.addWidget(self.playlist_combo, stretch=1)
-        
-        layout.addLayout(playlist_layout)
+        # Remove manual playlist selection as requested - playlist will be set to 1 by default
         
         # Queue display (optional)
         if self.show_queue:
@@ -431,8 +382,8 @@ class MiniPlayer(QWidget):
         self.track_title_label.setText(track_name)
     
     def set_progress(self, progress: float) -> None:
-        """Set playback progress bar (0.0-1.0)."""
-        self.progress_bar.setValue(int(progress * 1000))
+        """Set playback progress bar (0.0-1.0). No-op since progress bar was removed."""
+        pass
     
     def set_volume_slider(self, volume: int) -> None:
         """Set volume slider position (0-100)."""
@@ -458,10 +409,8 @@ class MiniPlayer(QWidget):
         self.play_pause_button.update()  # Force repaint
     
     def set_playlist_dropdown(self, playlist_id: int) -> None:
-        """Set selected playlist in dropdown."""
-        self.playlist_combo.blockSignals(True)
-        self.playlist_combo.setCurrentIndex(playlist_id - 1)
-        self.playlist_combo.blockSignals(False)
+        """Set selected playlist in dropdown. No-op since dropdown was removed."""
+        pass
     
     def clear_queue(self) -> None:
         """Clear the queue display."""
