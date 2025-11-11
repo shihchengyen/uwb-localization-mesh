@@ -63,6 +63,9 @@ class AdaptiveAudioWidget(QWidget):
         # Store reference to shared floorplan if provided
         self._shared_floorplan = services.get("shared_floorplan", None)
         
+        # Store reference to server for direct access
+        self.server = services.get("server", None)
+        
         # Setup UI
         self._setup_ui()
         
@@ -81,6 +84,15 @@ class AdaptiveAudioWidget(QWidget):
         self.zone_timer = QTimer()
         self.zone_timer.timeout.connect(self._check_zone_state)
         self.zone_timer.start(100)  # Check every 100ms
+        
+        # Queue polling timer for direct server access
+        self.queue_timer = QTimer()
+        self.queue_timer.timeout.connect(self._poll_queue_state)
+        self.queue_timer.start(1000)  # Poll every 1 second
+        
+        # Set default playlist to 1 as requested
+        if self.server and hasattr(self.server, 'set_playlist'):
+            self.server.set_playlist(1)
     
     def _setup_ui(self):
         """Build the UI components."""
@@ -121,16 +133,7 @@ class AdaptiveAudioWidget(QWidget):
         title.setStyleSheet("font-size: 14pt; font-weight: bold;")
         sidebar.addWidget(title)
         
-        # Control checkboxes
-        controls_group = QGroupBox("Controls")
-        controls_layout = QVBoxLayout()
-        
-        self.bypass_checkbox = QCheckBox("Bypass Audio Processing")
-        self.bypass_checkbox.toggled.connect(self._on_bypass_toggled)
-        controls_layout.addWidget(self.bypass_checkbox)
-        
-        controls_group.setLayout(controls_layout)
-        sidebar.addWidget(controls_group)
+        # Remove bypass audio processing as requested
         
         # Zone info
         zone_group = QGroupBox("Zone Status")
@@ -315,11 +318,21 @@ class AdaptiveAudioWidget(QWidget):
     
     def _on_skip(self):
         """Handle skip button click."""
-        self.bus.skipRequested.emit("adaptive_widget")
+        # Direct access to server for song skipping
+        if self.server and hasattr(self.server, 'skip_track'):
+            self.server.skip_track()
+        else:
+            # Fallback to AppBus if server not available
+            self.bus.skipRequested.emit("adaptive_widget")
     
     def _on_previous(self):
         """Handle previous button click."""
-        self.bus.previousRequested.emit("adaptive_widget")
+        # Direct access to server for previous track
+        if self.server and hasattr(self.server, 'previous_track'):
+            self.server.previous_track()
+        else:
+            # Fallback to AppBus if server not available
+            self.bus.previousRequested.emit("adaptive_widget")
     
     def _on_seek(self, position: float):
         """Handle seek slider."""
@@ -327,21 +340,27 @@ class AdaptiveAudioWidget(QWidget):
     
     def _on_volume_changed(self, volume: int):
         """Handle volume slider change."""
-        # Set volume for all speakers in adaptive mode
-        self.bus.volumeChangeRequested.emit(-1, volume)
+        # Direct access to server for volume control
+        if self.server and hasattr(self.server, 'set_global_volume'):
+            self.server.set_global_volume(volume)
+        else:
+            # Fallback to AppBus if server not available
+            self.bus.volumeChangeRequested.emit(-1, volume)
     
     def _on_playlist_selected(self, playlist_id: int):
         """Handle playlist selection."""
-        self.bus.playlistChangeRequested.emit(playlist_id)
+        # Direct access to server for playlist setting
+        if self.server and hasattr(self.server, 'set_playlist'):
+            self.server.set_playlist(playlist_id)
+        else:
+            # Fallback to AppBus if server not available
+            self.bus.playlistChangeRequested.emit(playlist_id)
     
     def _on_shuffle_toggled(self, checked: bool):
         """Handle shuffle toggle."""
         self.bus.shuffleToggled.emit(checked)
     
-    def _on_bypass_toggled(self, checked: bool):
-        """Handle bypass audio processing checkbox."""
-        self.is_bypassed = checked
-        self.bus.bypassAudioRequested.emit(checked)
+    # Removed bypass audio processing as requested
     
     def _on_homography_computed(self):
         """Handle homography computation - create zones now."""
@@ -480,3 +499,16 @@ class AdaptiveAudioWidget(QWidget):
         # Update floorplan speaker visualization
         if self.floorplan:
             self.floorplan.set_speaker_volumes(volumes)
+    
+    def _poll_queue_state(self):
+        """Poll queue state directly from server."""
+        if self.server and hasattr(self.server, 'adaptive_audio_server'):
+            adaptive_server = self.server.adaptive_audio_server
+            if adaptive_server:
+                # Get queue preview and current track directly
+                queue_preview = adaptive_server.get_queue_preview(5)
+                current_track = adaptive_server.get_current_song()
+                
+                # Update mini player directly
+                self.mini_player.update_queue_list(queue_preview)
+                self.mini_player.update_current_track(current_track)

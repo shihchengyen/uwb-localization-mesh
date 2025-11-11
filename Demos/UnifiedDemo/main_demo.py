@@ -96,24 +96,79 @@ def _start_server_bringup(use_dummy=False, settings=None, simulation_speed=None)
         
             return None
     else:
-        # Try real server first
+        # Try real server options (prioritize Server_bring_up_with_Audio.py)
         try:
-            import ServerBringUp
-            sb = ServerBringUp.ServerBringUp()
+            # Try Server_bring_up_with_Audio.py (Full ServerBringUpProMax with advanced audio)
+            import sys
+            import os
+            repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            if repo_root not in sys.path:
+                sys.path.insert(0, repo_root)
+            
+            from Server_bring_up_with_Audio import ServerBringUpProMax
+            from packages.uwb_mqtt_server.config import MQTTConfig
+            
+            # Create MQTT config with defaults
+            mqtt_config = MQTTConfig(
+                broker="localhost",
+                port=1884,
+                username="laptop", 
+                password="laptop"
+            )
+            
+            sb = ServerBringUpProMax(mqtt_config=mqtt_config)
             if hasattr(sb, "start"):
                 sb.start()
+            print("[UnifiedDemo] Started ServerBringUpProMax (full audio pipeline)")
             return sb
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[UnifiedDemo] ServerBringUpProMax (full audio) failed: {e}")
+        
         try:
-            from Demos.ServerBringUp import ServerBringUp
-            sb = ServerBringUp()
+            # Fallback: Try demo_server_bring_up.py (DEPRECATED - basic audio)
+            from demo_server_bring_up import ServerBringUpProMax
+            from packages.uwb_mqtt_server.config import MQTTConfig
+            
+            mqtt_config = MQTTConfig(
+                broker="localhost",
+                port=1884,
+                username="laptop",
+                password="laptop"
+            )
+            
+            sb = ServerBringUpProMax(mqtt_config=mqtt_config)
             if hasattr(sb, "start"):
                 sb.start()
+            print("[UnifiedDemo] ⚠️  Started ServerBringUpProMax (DEPRECATED - basic audio)")
+            print("[UnifiedDemo] ⚠️  Consider using Server_bring_up_with_Audio.py for full features")
             return sb
-        except Exception:
-            print("[UnifiedDemo] ServerBringUp not found. Use --dummy flag for simulation.")
-            return None
+        except Exception as e:
+            print(f"[UnifiedDemo] ServerBringUpProMax (deprecated) failed: {e}")
+        
+        try:
+            # Last resort: Try Server_bring_up.py (basic ServerBringUp - no audio)
+            from Server_bring_up import ServerBringUp
+            from packages.uwb_mqtt_server.config import MQTTConfig
+            
+            mqtt_config = MQTTConfig(
+                broker="localhost",
+                port=1884,
+                username="laptop",
+                password="laptop"
+            )
+            
+            sb = ServerBringUp(mqtt_config=mqtt_config)
+            if hasattr(sb, "start"):
+                sb.start()
+            print("[UnifiedDemo] Started ServerBringUp (basic version - no audio)")
+            return sb
+        except Exception as e:
+            print(f"[UnifiedDemo] ServerBringUp (basic) failed: {e}")
+            
+        print("[UnifiedDemo] No real server found. Use --dummy flag for simulation.")
+        print("[UnifiedDemo] Make sure MQTT broker is running on localhost:1884")
+        print("[UnifiedDemo] Recommended: Use Server_bring_up_with_Audio.py for full functionality")
+        return None
 
 def _load_pgo_widget(app_bus, services, settings):
     try:
@@ -227,6 +282,9 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Server Error", 
                                "Failed to start server. Use --dummy flag for simulation.")
             return
+
+        # Add server to services for direct access by widgets
+        self.services["server"] = self.server
 
         # Connect AppBus signals to server methods (routing layer)
         self._connect_appbus_signals()

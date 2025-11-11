@@ -66,6 +66,17 @@ class AdaptiveAudioServer:
         self.started_for_pair: Optional[str] = None
         self.volumes = {0: 70, 1: 70, 2: 70, 3: 70}
         self._last_position: Optional[np.ndarray] = None
+        
+        # Song queue management
+        self.song_queue = [
+            "crazy-carls-brickhouse-tavern.wav",
+            "funky-bossanova-guitar.wav", 
+            "guitar-on-loop.mp3",
+            "Track 4 - Playlist 1",
+            "Track 5 - Playlist 1"
+        ]
+        self.current_track_index = 0
+        self.current_playlist = 1
 
     def compute_adaptive_audio_state(self, position, global_time: float, execute_delay_ms: int = 500) -> dict:
         """
@@ -318,3 +329,104 @@ class AdaptiveAudioServer:
         return {
             'commands': commands
         }
+    
+    # ================================================================
+    # SONG QUEUE MANAGEMENT METHODS
+    # ================================================================
+    
+    def next_song(self) -> str:
+        """
+        Skip to the next song in the queue.
+        Returns the new current song name.
+        """
+        if self.song_queue:
+            self.current_track_index = (self.current_track_index + 1) % len(self.song_queue)
+            return self.song_queue[self.current_track_index]
+        return "No songs in queue"
+    
+    def previous_song(self) -> str:
+        """
+        Go to the previous song in the queue.
+        Returns the new current song name.
+        """
+        if self.song_queue:
+            self.current_track_index = (self.current_track_index - 1) % len(self.song_queue)
+            return self.song_queue[self.current_track_index]
+        return "No songs in queue"
+    
+    def get_current_song(self) -> str:
+        """Get the current song name."""
+        if self.song_queue and 0 <= self.current_track_index < len(self.song_queue):
+            return self.song_queue[self.current_track_index]
+        return "No current song"
+    
+    def get_queue_preview(self, limit: int = 5) -> list:
+        """Get preview of upcoming songs in the queue."""
+        if not self.song_queue:
+            return []
+        
+        preview = []
+        for i in range(limit):
+            index = (self.current_track_index + i) % len(self.song_queue)
+            preview.append(self.song_queue[index])
+        return preview
+    
+    def set_playlist(self, playlist_number: int):
+        """
+        Set the current playlist and update the song queue.
+        """
+        self.current_playlist = playlist_number
+        
+        # Update song queue based on playlist
+        if playlist_number == 1:
+            self.song_queue = [
+                "crazy-carls-brickhouse-tavern.wav",
+                "funky-bossanova-guitar.wav", 
+                "guitar-on-loop.mp3",
+                "Track 4 - Playlist 1",
+                "Track 5 - Playlist 1"
+            ]
+        elif playlist_number == 2:
+            self.song_queue = [
+                "Track 1 - Playlist 2",
+                "Track 2 - Playlist 2",
+                "Track 3 - Playlist 2",
+                "Track 4 - Playlist 2",
+                "Track 5 - Playlist 2"
+            ]
+        elif playlist_number == 3:
+            self.song_queue = [
+                "Track 1 - Playlist 3",
+                "Track 2 - Playlist 3",
+                "Track 3 - Playlist 3",
+                "Track 4 - Playlist 3",
+                "Track 5 - Playlist 3"
+            ]
+        elif playlist_number == 4:
+            self.song_queue = [
+                "Track 1 - Playlist 4",
+                "Track 2 - Playlist 4",
+                "Track 3 - Playlist 4",
+                "Track 4 - Playlist 4",
+                "Track 5 - Playlist 4"
+            ]
+        elif playlist_number == 5:
+            self.song_queue = [
+                "Track 1 - Playlist 5",
+                "Track 2 - Playlist 5",
+                "Track 3 - Playlist 5",
+                "Track 4 - Playlist 5",
+                "Track 5 - Playlist 5"
+            ]
+        else:
+            # Default to playlist 1
+            self.song_queue = [
+                "crazy-carls-brickhouse-tavern.wav",
+                "funky-bossanova-guitar.wav", 
+                "guitar-on-loop.mp3",
+                "Track 4 - Playlist 1",
+                "Track 5 - Playlist 1"
+            ]
+        
+        # Reset to first track
+        self.current_track_index = 0

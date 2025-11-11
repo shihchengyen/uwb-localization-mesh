@@ -61,6 +61,9 @@ class ZoneDjWidget(QWidget):
         # Store reference to shared floorplan if provided
         self._shared_floorplan = services.get("shared_floorplan", None)
         
+        # Store reference to server for direct access
+        self.server = services.get("server", None)
+        
         # Setup UI
         self._setup_ui()
         
@@ -217,11 +220,21 @@ class ZoneDjWidget(QWidget):
     
     def _on_skip(self):
         """Handle skip button click."""
-        self.bus.skipRequested.emit("zone_dj_widget")
+        # Direct access to server for song skipping
+        if self.server and hasattr(self.server, 'skip_track'):
+            self.server.skip_track()
+        else:
+            # Fallback to AppBus if server not available
+            self.bus.skipRequested.emit("zone_dj_widget")
     
     def _on_previous(self):
         """Handle previous button click."""
-        self.bus.previousRequested.emit("zone_dj_widget")
+        # Direct access to server for previous track
+        if self.server and hasattr(self.server, 'previous_track'):
+            self.server.previous_track()
+        else:
+            # Fallback to AppBus if server not available
+            self.bus.previousRequested.emit("zone_dj_widget")
     
     def _on_seek(self, position: float):
         """Handle seek slider."""
@@ -229,14 +242,23 @@ class ZoneDjWidget(QWidget):
     
     def _on_volume_changed(self, volume: int):
         """Handle volume slider change."""
-        # Set volume for active zone's speakers
-        if self.active_zone:
+        # Direct access to server for volume control
+        if self.server and hasattr(self.server, 'set_global_volume'):
+            self.server.set_global_volume(volume)
+        elif self.active_zone:
+            # Fallback: Set volume for active zone's speakers
             device_id = self.active_zone.id  # Simplified: use zone ID as device ID
             self.bus.volumeChangeRequested.emit(device_id, volume)
     
     def _on_playlist_selected(self, playlist_id: int):
         """Handle playlist selection."""
-        self.bus.playlistChangeRequested.emit(playlist_id)
+        # Direct access to server for playlist setting
+        if self.server and hasattr(self.server, 'set_playlist'):
+            self.server.set_playlist(playlist_id)
+        else:
+            # Fallback to AppBus if server not available
+            self.bus.playlistChangeRequested.emit(playlist_id)
+        
         # Associate with current active zone
         if self.active_zone:
             self.zone_playlists[self.active_zone.id] = playlist_id
