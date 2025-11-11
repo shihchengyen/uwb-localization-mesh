@@ -899,7 +899,7 @@ class FloorplanView(QGraphicsView):
         self.current_zone = None
     
     def _check_zone_registration(self):
-        """Check zone hover/leave timers."""
+        """Check zone hover/leave timers with proper zone transition handling."""
         if self.current_pointer_pos is None:
             return
         
@@ -915,10 +915,26 @@ class FloorplanView(QGraphicsView):
                 zone_found = zone
                 break
         
+        # Handle zone transitions - cancel timers and reset state
+        if zone_found != self.current_zone:
+            print(f"🔄 [FloorplanView] Zone transition: {getattr(self.current_zone, 'id', 'None')} -> {getattr(zone_found, 'id', 'None')}")
+            
+            # Cancel any existing timers
+            if self.zone_hover_start is not None:
+                self.zone_hover_start.stop()
+                self.zone_hover_start = None
+            if self.zone_leave_start is not None:
+                self.zone_leave_start.stop()
+                self.zone_leave_start = None
+            
+            # Update current zone (but don't change active status yet - let timer handle it)
+            self.current_zone = zone_found
+        
         # Zone registration logic
         if zone_found and not zone_found.is_active:
-            # Entering zone - start timer if not already started
+            # Entering new zone - start timer if not already started
             if self.zone_hover_start is None:
+                print(f"⏱️  [FloorplanView] Starting 3-second timer for Zone {zone_found.id}")
                 self.zone_hover_start = QTimer()
                 self.zone_hover_start.setSingleShot(True)
                 # Use a closure to capture the zone
@@ -926,31 +942,22 @@ class FloorplanView(QGraphicsView):
                     self._register_zone(zone_found)
                 self.zone_hover_start.timeout.connect(register_zone)
                 self.zone_hover_start.start(self.t_register_ms)
-            # Cancel leave timer if we're back in a zone
-            if self.zone_leave_start is not None:
-                self.zone_leave_start.stop()
-                self.zone_leave_start = None
         elif zone_found and zone_found.is_active:
-            # Still in zone - cancel any leave timer
-            if self.zone_leave_start is not None:
-                self.zone_leave_start.stop()
-                self.zone_leave_start = None
+            # Still in active zone - maintain activation
+            pass
         elif self.current_zone and self.current_zone.is_active:
-            # Leaving zone - start leave timer if not already started
+            # Leaving active zone - start leave timer if not already started
             if self.zone_leave_start is None:
+                print(f"⏱️  [FloorplanView] Starting 1-second leave timer for Zone {self.current_zone.id}")
                 self.zone_leave_start = QTimer()
                 self.zone_leave_start.setSingleShot(True)
                 # Use a closure to capture the current zone
                 current_zone_ref = self.current_zone
                 def deregister_zone():
-                    if current_zone_ref:
+                    if current_zone_ref and current_zone_ref.is_active:
                         self._deregister_zone(current_zone_ref)
                 self.zone_leave_start.timeout.connect(deregister_zone)
                 self.zone_leave_start.start(self.t_deregister_ms)
-            # Cancel hover timer since we're leaving
-            if self.zone_hover_start is not None:
-                self.zone_hover_start.stop()
-                self.zone_hover_start = None
         else:
             # Not in any zone - cancel all timers
             if self.zone_hover_start is not None:
@@ -961,7 +968,24 @@ class FloorplanView(QGraphicsView):
                 self.zone_leave_start = None
     
     def _register_zone(self, zone):
-        """Register zone (user entered and stayed)."""
+        """Register zone (user entered and stayed). Only one zone can be active at a time."""
+        print(f"🟢 [FloorplanView] Activating Zone {zone.id} - User stayed for 3+ seconds!")
+        
+        # Deactivate ALL other zones first
+        for other_zone in self.zones:
+            if other_zone != zone and other_zone.is_active:
+                print(f"    Deactivating Zone {other_zone.id} (replaced by Zone {zone.id})")
+                other_zone.is_active = False
+                # Redraw the deactivated zone
+                if other_zone.graphics_item:
+                    self.scene.removeItem(other_zone.graphics_item)
+                    other_zone.graphics_item = None
+                if isinstance(other_zone, RectangularZone):
+                    self._draw_rectangular_zone(other_zone)
+                else:
+                    self._draw_zone(other_zone)
+        
+        # Activate the new zone
         zone.is_active = True
         self.current_zone = zone
         
@@ -975,10 +999,12 @@ class FloorplanView(QGraphicsView):
         else:
             self._draw_zone(zone)
         
+        print(f"    Zone {zone.id} is now the ONLY active zone (bright green)")
         self.zoneRegistered.emit(zone)
     
     def _deregister_zone(self, zone):
         """Deregister zone (user left)."""
+        print(f"🔴 [FloorplanView] Deregistering Zone {zone.id} - User left zone!")
         zone.is_active = False
         
         # Update visualization (redraw to update colors and ensure correct size)
@@ -991,6 +1017,7 @@ class FloorplanView(QGraphicsView):
         else:
             self._draw_zone(zone)
         
+        print(f"    Zone {zone.id} should now return to normal color")
         self.zoneDeregistered.emit(zone)
         self.current_zone = None
     

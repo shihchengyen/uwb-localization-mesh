@@ -316,7 +316,11 @@ class ZoneDjWidget(QWidget):
         pass
     
     def _on_zone_registered(self, zone):
-        """Handle zone registration from FloorplanView."""
+        """Handle zone registration from FloorplanView. Only one zone can be active at a time."""
+        # Clear any previous active zone (should already be handled by FloorplanView, but double-check)
+        if self.active_zone and self.active_zone != zone:
+            print(f"🔄 [ZoneDjWidget] Replacing active zone {self.active_zone.id} with {zone.id}")
+        
         self.active_zone = zone
         self.active_zone_label.setText(f"Active Zone: {zone.id}")
         
@@ -334,12 +338,22 @@ class ZoneDjWidget(QWidget):
         # Auto-set playlist based on zone's assigned playlist
         if hasattr(zone, 'playlist'):
             playlist_id = zone.playlist
-            print(f"[ZoneDjWidget] Zone {zone.id} registered, switching to playlist {playlist_id}")
+            print(f"🎵 [ZoneDjWidget] Zone {zone.id} is now the ONLY ACTIVE ZONE! Switching to playlist {playlist_id}")
+            print(f"    All other zones should be deactivated")
+            
             # Direct access to server for playlist setting
             if self.server and hasattr(self.server, 'set_playlist'):
                 self.server.set_playlist(playlist_id)
+                print(f"    ✅ Playlist {playlist_id} set on server")
+                
+                # Verify the playlist change worked
+                if hasattr(self.server, 'adaptive_audio_server'):
+                    current_playlist = getattr(self.server.adaptive_audio_server, 'current_playlist', 'unknown')
+                    queue_preview = self.server.adaptive_audio_server.get_queue_preview(3)
+                    print(f"    📋 Server playlist: {current_playlist}, Queue: {queue_preview}")
             else:
                 # Fallback to AppBus if server not available
+                print(f"    ⚠️  Using AppBus fallback for playlist change")
                 self.bus.playlistChangeRequested.emit(playlist_id)
             
             # Note: Mini player dropdown was removed as requested, playlist change is handled by server
@@ -354,6 +368,8 @@ class ZoneDjWidget(QWidget):
     def _on_zone_deregistered(self, zone):
         """Handle zone deregistration from FloorplanView."""
         if self.active_zone and self.active_zone.id == zone.id:
+            print(f"🚫 [ZoneDjWidget] Zone {zone.id} DEACTIVATED!")
+            print(f"    Zone should now return to normal color")
             self.active_zone = None
             self.active_zone_label.setText("Active Zone: --")
             

@@ -96,3 +96,26 @@ This is slightly more complicated due to the logic on the PYQT side and implemen
    - Applied centering to both specific and fallback floorplan loading
    - Uses 10% margins for proper centering within coordinate bounds
 
+### Zone Activation Debugging
+7. Added comprehensive debug logging for zone activation:
+   - FloorplanView: Logs when zones register/deregister with visual feedback status
+   - ZoneDjWidget: Logs playlist changes and server state verification
+   - Clear console output shows zone activation flow and playlist switching
+   - Helps verify the 3-second activation timer and playlist changes are working
+
+### Zone Transition Fix
+8. Fixed zone transition logic for direct zone-to-zone movement:
+   - Detects when user moves directly from Zone 1 to Zone 3 without exiting
+   - Immediately deactivates old zone when transitioning to new zone
+   - Cancels conflicting timers during zone transitions
+   - Starts new 3-second timer for the new zone
+   - Prevents multiple active zones and ensures proper playlist switching
+
+### Zone System Simplification
+9. Simplified zone system to only two clear states:
+   - **Current Zone**: Zone user is currently in (immediate detection, light green)
+   - **Active Zone**: Zone that's been active for 3+ seconds (bright green, controls playlist)
+   - When any zone becomes active, ALL other zones are immediately deactivated
+   - Only one zone can be active at a time - clean and predictable behavior
+   - Removed complex timer management and state conflicts
+
