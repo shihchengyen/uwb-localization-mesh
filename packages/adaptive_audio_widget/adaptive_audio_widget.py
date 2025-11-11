@@ -1,21 +1,20 @@
 """
-AdaptiveAudioWidget - Fixed 2-Zone Follow-Me Audio System
+AdaptiveAudioWidget - Position-Based Audio Panning System
 
-Provides a visualization and control interface for adaptive audio with two fixed zones.
+Provides a visualization and control interface for adaptive audio based purely on user position.
 Uses shared subwidgets: FloorplanView and MiniPlayer.
 
 Features:
-- Fixed 2-zone split at Y = 3.00 m
-- Zone registration/deregistration with timers
+- Position-based audio panning (no zones)
 - Floorplan visualization with homography
 - Audio control via MiniPlayer
+- Always plays from Playlist 1
 - All communication via AppBus (thread-safe)
 
-Zone Logic:
-- Zone A (Top): 0.00 m ≤ y < 3.00 m
-- Zone B (Bottom): 3.00 m ≤ y ≤ 6.00 m
-- Registration: Hover ≥3s
-- Deregistration: Leave ≥1s
+Audio Logic:
+- Front/back speaker selection based on Y position
+- Left/right panning based on X position
+- No zone registration - immediate response to position changes
 """
 
 import time
@@ -25,7 +24,7 @@ from PyQt5.QtCore import QTimer
 
 class AdaptiveAudioWidget(QWidget):
     """
-    Adaptive Audio widget with fixed 2-zone split.
+    Adaptive Audio widget with position-based audio panning.
     
     Subscribes to AppBus for position updates and state changes.
     Emits to AppBus for audio commands and event callbacks.
@@ -90,8 +89,10 @@ class AdaptiveAudioWidget(QWidget):
             self.floorplan = self._shared_floorplan
             # Reparent to this widget
             self.floorplan.setParent(self)
-            # Clear zones when switching to Adaptive Audio (it uses fixed zones, not placed zones)
+            # Clear any existing zones - adaptive audio doesn't use zones
             self.floorplan.clear_zones()
+            # Disable zone placement for adaptive audio
+            self.floorplan.placing_zones = False
         else:
             # Create new instance if no shared floorplan provided
             from viz_floorplan.floorplan_view import FloorplanView
@@ -184,8 +185,8 @@ class AdaptiveAudioWidget(QWidget):
         # Volume control
         self.mini_player.volumeChanged.connect(self._on_volume_changed)
         
-        # Playlist control
-        self.mini_player.playlistSelected.connect(self._on_playlist_selected)
+        # No playlist control - adaptive audio always uses Playlist 1
+        # self.mini_player.playlistSelected.connect(self._on_playlist_selected)  # Removed
         self.mini_player.shuffleToggled.connect(self._on_shuffle_toggled)
     
     def _connect_appbus_signals(self):
@@ -254,14 +255,10 @@ class AdaptiveAudioWidget(QWidget):
             # Fallback to AppBus if server not available
             self.bus.volumeChangeRequested.emit(-1, volume)
     
-    def _on_playlist_selected(self, playlist_id: int):
-        """Handle playlist selection."""
-        # Direct access to server for playlist setting
-        if self.server and hasattr(self.server, 'set_playlist'):
-            self.server.set_playlist(playlist_id)
-        else:
-            # Fallback to AppBus if server not available
-            self.bus.playlistChangeRequested.emit(playlist_id)
+    # Removed playlist selection - adaptive audio always uses Playlist 1
+    # def _on_playlist_selected(self, playlist_id: int):
+    #     """Handle playlist selection."""
+    #     # Adaptive audio always uses Playlist 1 - no manual selection needed
     
     def _on_shuffle_toggled(self, checked: bool):
         """Handle shuffle toggle."""
