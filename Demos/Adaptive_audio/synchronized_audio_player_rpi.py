@@ -97,7 +97,13 @@ class RPiAudioPlayer:
             self.audio_ready = False
     
     def load_stereo_channel(self, wav_path: str):
-        """Load only the left or right channel of the stereo audio file."""
+        """
+        Load the appropriate channel (left or right) from stereo audio file
+        and duplicate it to BOTH speaker outputs for louder playback.
+        
+        - Left speakers (RPi 1, 2): Extract left channel, play on both L+R outputs
+        - Right speakers (RPi 0, 3): Extract right channel, play on both L+R outputs
+        """
         import numpy as np
         import wave
         
@@ -126,31 +132,41 @@ class RPiAudioPlayer:
         # Reshape to separate left and right channels
         audio_data = audio_data.reshape(-1, 2)
         
-        # Select the appropriate channel
-        if self.rpi_id in [1, 2]:  # Left speakers - play left channel
+        # Select the appropriate channel from the source audio
+        if self.rpi_id in [1, 2]:  # Left speakers - extract left channel
             channel_data = audio_data[:, 0]
-        else:  # Right speakers (0, 3) - play right channel
+            channel_name = "LEFT"
+        else:  # Right speakers (0, 3) - extract right channel
             channel_data = audio_data[:, 1]
+            channel_name = "RIGHT"
         
-        # Convert back to mono by duplicating the channel
-        mono_data = np.column_stack((channel_data, channel_data))
+        # Duplicate the selected channel to BOTH speaker outputs (L and R)
+        # This makes the speaker play louder by using both outputs
+        stereo_output = np.column_stack((channel_data, channel_data))
         
         # Convert back to bytes
         if sample_width == 2:  # 16-bit
-            mono_bytes = mono_data.astype(np.int16).tobytes()
+            stereo_bytes = stereo_output.astype(np.int16).tobytes()
         elif sample_width == 4:  # 32-bit
-            mono_bytes = mono_data.astype(np.int32).tobytes()
+            stereo_bytes = stereo_output.astype(np.int32).tobytes()
+        else:
+            # Unsupported sample width, fallback to normal loading
+            pygame.mixer.music.load(wav_path)
+            print(f"   Unsupported sample width: {sample_width}, falling back to normal loading")
+            return
         
-        # Create a temporary WAV file with the selected channel
+        # Create a temporary WAV file with the selected channel on both outputs
         temp_wav_path = f"temp_channel_{self.rpi_id}.wav"
         with wave.open(temp_wav_path, 'wb') as temp_wav:
-            temp_wav.setnchannels(2)  # Keep as stereo for pygame compatibility
+            temp_wav.setnchannels(2)  # Stereo output (same channel audio on both L and R)
             temp_wav.setsampwidth(sample_width)
             temp_wav.setframerate(sample_rate)
-            temp_wav.writeframes(mono_bytes)
+            temp_wav.writeframes(stereo_bytes)
         
         # Load the processed audio
         pygame.mixer.music.load(temp_wav_path)
+        
+        print(f"   Loaded {channel_name} channel, playing on both speaker outputs for louder volume")
         
         # Clean up temporary file after loading
         import os
