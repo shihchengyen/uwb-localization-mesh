@@ -12,10 +12,10 @@ Usage:
     python Anchor_bring_up.py
 
     # Or use command line argument
-    python Anchor_bring_up.py --anchor-id 0
+    uv run Anchor_bring_up.py --anchor-id 0 --broker 192.168.68.65
 
-    # Override MQTT broker
-    python Anchor_bring_up.py --broker 192.168.1.100
+    # Override MQTT broker [use this]
+    uv run Anchor_bring_up.py --broker 192.168.68.65
 
 Environment Variables:
     ANCHOR_ID: Anchor ID (0-3) - REQUIRED
