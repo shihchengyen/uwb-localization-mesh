@@ -7,9 +7,31 @@ import random
 
 class PlaylistController:
     def __init__(self):
-        self.playlist1 = []
-        self.playlist2 = []
-        self.playlist3 = []
+        # Playlist 1: Jazz (P1)
+        self.playlist1 = [
+            "Demos/Audio_Library/P1 - Bad Ideas - Silent Film Dark - Kevin MacLeod.wav",
+            "Demos/Audio_Library/P1 - Bad Ideas Distressed - Kevin MacLeod.wav",
+            "Demos/Audio_Library/P1 - Baila Mi Cumbia - Jimmy Fontanez_Media Right Productions.wav",
+            "Demos/Audio_Library/P1 - Ersatz Bossa John Deley and the 41 Players.wav",
+            "Demos/Audio_Library/P1 - Hit the Lights - Twin Musicom.wav",
+            "Demos/Audio_Library/P1 - Minor Mush - John Deley.wav"
+        ]
+        # Playlist 2: Classical (P2)
+        self.playlist2 = [
+            "Demos/Audio_Library/P2 - Busy Strings - Kevin MacLeod.wav",
+            "Demos/Audio_Library/P2 - Cinematic - Twin Musicom.wav",
+            "Demos/Audio_Library/P2 - Hero Theme - Kevin MacLeod.wav",
+            "Demos/Audio_Library/P2 - Serious Piano - Audionautix.wav",
+            "Demos/Audio_Library/P2 - Bugle-Calls-Mess-Call-USAF-Heritage-of-America-Band.wav"
+        ]
+        # Playlist 3: Countryfolk (P3)
+        self.playlist3 = [
+            "Demos/Audio_Library/P3 - All-Good-In-The-Wood-Audionautix.wav",
+            "Demos/Audio_Library/P3 - Country-Cue-1-Audionautix.wav",
+            "Demos/Audio_Library/P3 - Dobro-Mash-Audionautix.wav",
+            "Demos/Audio_Library/P3 - Mariachi-Snooze-Kevin-MacLeod.wav",
+            "Demos/Audio_Library/P3 - On My Way Home - The 126ers.wav"
+        ]
         self.playlist4 = []
         self.playlist5 = []
 
