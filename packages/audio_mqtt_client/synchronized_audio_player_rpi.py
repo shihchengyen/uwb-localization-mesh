@@ -257,6 +257,32 @@ class RPiAudioPlayer:
                     pygame.mixer.music.set_volume(self.current_volume / 100.0)
                     print(f"🔊 VOLUME: {old_volume}% → {self.current_volume}%")
             
+            elif command == "load_track":
+                # Handle track loading command
+                track_file = message.get("track_file")
+                if track_file:
+                    try:
+                        # Stop current playback
+                        was_playing = self.is_playing
+                        if self.is_playing:
+                            pygame.mixer.music.stop()
+                            self.is_playing = False
+                        
+                        # Load new track
+                        pygame.mixer.music.load(track_file)
+                        print(f"🎵 LOADED: {track_file}")
+                        
+                        # Resume playback if it was playing before
+                        if was_playing:
+                            pygame.mixer.music.play(-1)  # Loop forever
+                            self.is_playing = True
+                            print(f"🎵 RESUMED playing: {track_file}")
+                            
+                    except pygame.error as e:
+                        print(f"❌ Failed to load track {track_file}: {e}")
+                else:
+                    print(f"⚠️  load_track command missing track_file parameter")
+            
             elif command in ["left", "right"]:
                 old_volume = self.current_volume
                 

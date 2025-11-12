@@ -176,8 +176,10 @@ class ServerBringUpProMax:
                 "rpi_id": cmd['rpi_id'],
                 "command_id": str(uuid.uuid4()),
             }
-            if cmd['volume'] is not None:
+            if cmd.get('volume') is not None:
                 msg["target_volume"] = clamp(cmd['volume'])
+            if cmd.get('track_file') is not None:
+                msg["track_file"] = cmd['track_file']
 
             if cmd['rpi_id'] is None:
                 topic = f"{self.audio_topic}/broadcast"
@@ -551,6 +553,13 @@ class ServerBringUpProMax:
         if self.adaptive_audio_server:
             new_song = self.adaptive_audio_server.next_song()
             logger.info(json.dumps({"event": "skip_track_requested", "new_song": new_song}))
+            
+            # Send load_track commands to all speakers
+            global_time = time.time()
+            load_commands = self.adaptive_audio_server.get_load_track_commands(global_time)
+            if load_commands['commands']:
+                self._publish_commands(load_commands['commands'])
+                logger.info(json.dumps({"event": "load_track_commands_sent", "track": new_song, "num_commands": len(load_commands['commands'])}))
         else:
             # Fallback: simulate track skipping by updating track counter
             self.current_track_index += 1
@@ -561,6 +570,13 @@ class ServerBringUpProMax:
         if self.adaptive_audio_server:
             new_song = self.adaptive_audio_server.previous_song()
             logger.info(json.dumps({"event": "previous_track_requested", "new_song": new_song}))
+            
+            # Send load_track commands to all speakers
+            global_time = time.time()
+            load_commands = self.adaptive_audio_server.get_load_track_commands(global_time)
+            if load_commands['commands']:
+                self._publish_commands(load_commands['commands'])
+                logger.info(json.dumps({"event": "load_track_commands_sent", "track": new_song, "num_commands": len(load_commands['commands'])}))
         else:
             # Fallback: simulate previous track by updating track counter
             self.current_track_index = max(0, self.current_track_index - 1)

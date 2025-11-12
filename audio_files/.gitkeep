@@ -1,0 +1,12 @@
+# Audio Files Directory
+
+This directory contains audio files for the UWB localization mesh audio system.
+
+Place your .wav and .mp3 files here. The filenames should match the track names in the playlists.
+
+Example files:
+- crazy-carls-brickhouse-tavern.wav
+- funky-bossanova-guitar.wav  
+- guitar-on-loop.mp3
+
+The audio files will be loaded by the RPi audio players when track switching commands are sent.

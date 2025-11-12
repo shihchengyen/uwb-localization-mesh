@@ -128,3 +128,13 @@ This is slightly more complicated due to the logic on the PYQT side and implemen
    - Disabled zone placement functionality in adaptive audio mode
    - Clean separation between Zone DJ (user zones) and Adaptive Audio (position-only)
 
+### Song Switching Implementation
+11. Implemented complete song switching functionality:
+   - Added `load_track` command to RPi audio player (synchronized_audio_player_rpi.py)
+   - Updated AdaptiveAudioServer with `get_load_track_commands()` method
+   - Modified ServerBringUpProMax `skip_track()` and `previous_track()` to send load commands
+   - Updated MQTT command publishing to support `track_file` parameter
+   - Created `audio_files/` directory for storing audio tracks
+   - Updated all playlists to use proper file paths (audio_files/filename.wav)
+   - Song switching now works: PyQt → Server → AdaptiveAudioServer → MQTT → RPi players
+
