@@ -11,7 +11,14 @@ Usage:
     
 Example:
 in \Data_collection\Data:
+
     uv run data_processing_scripts\plot_single_anchor_measurements_by_orientation.py 28oct\datapoints28oct.csv 3
+    or
+    
+    uv run data_processing_scripts\plot_single_anchor_measurements_by_orientation.py 28oct\datapoints28oct.csv all
+    or
+
+    uv run data_processing_scripts\plot_single_anchor_measurements_by_orientation.py 28oct\datapoints28oct.csv all 120.0,180.0,0.0
 """
 
 import pandas as pd
@@ -154,14 +161,15 @@ def calculate_phone_positions(anchor_id: int, global_measurements: List[np.ndarr
     phone_positions = [anchor_pos + meas for meas in global_measurements]
     return phone_positions
 
-def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[int], output_dir: Path):
+def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[int], output_dir: Path, coord_filter: Optional[Tuple[float, float, float]] = None):
     """
     Create visualization plots for measurements, colored by phone orientation.
     
     Args:
-        df: DataFrame with measurement data
+        df: DataFrame with measurement data (already filtered if coord_filter was provided)
         anchor_id: ID of anchor to plot, or None for all anchors combined
         output_dir: Directory to save output files
+        coord_filter: Optional tuple (x, y, z) indicating filtered coordinates
     """
     
     # Group data by orientation
@@ -232,9 +240,10 @@ def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[i
     # Plot all anchor positions (grey and small)
     # Note: These are the 4 anchor positions, shown as grey squares for reference
     # They are NOT measurement dots - they are the fixed anchor locations
+    # zorder=1 ensures they appear below the measurement dots (zorder=3)
     for aid, anchor_pos in ANCHOR_POSITIONS.items():
         ax.scatter([anchor_pos[0]], [anchor_pos[1]], c='grey', marker='s', s=100, 
-                  zorder=5, edgecolors='black', linewidths=1.5)
+                  zorder=1, edgecolors='black', linewidths=1.5)
     
     # Plot all ground truth positions as grey crosses (once, not per orientation)
     for gt_x, gt_y in all_gt_positions:
@@ -260,10 +269,18 @@ def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[i
     
     ax.set_xlabel('X (cm)', fontsize=12)
     ax.set_ylabel('Y (cm)', fontsize=12)
+    
+    # Build title
     if anchor_id is None:
-        ax.set_title(f'All Measurements from All Anchors by Phone Orientation', fontsize=14)
+        title = 'All Measurements from All Anchors by Phone Orientation'
     else:
-        ax.set_title(f'All Measurements from Anchor {anchor_id} by Phone Orientation', fontsize=14)
+        title = f'All Measurements from Anchor {anchor_id} by Phone Orientation'
+    
+    if coord_filter is not None:
+        filter_x, filter_y, filter_z = coord_filter
+        title += f'\nFiltered: GT=({filter_x}, {filter_y}, {filter_z})'
+    
+    ax.set_title(title, fontsize=14)
     ax.grid(True, alpha=0.3)
     ax.set_aspect('equal', adjustable='box')
     
@@ -271,10 +288,20 @@ def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[i
     ax.legend(loc='best', fontsize=10)
     
     plt.tight_layout()
+    
+    # Build output filename
     if anchor_id is None:
-        output_file = output_dir / f'all_anchors_all_measurements_by_orientation.png'
+        base_name = 'all_anchors_all_measurements_by_orientation'
     else:
-        output_file = output_dir / f'anchor_{anchor_id}_all_measurements_by_orientation.png'
+        base_name = f'anchor_{anchor_id}_all_measurements_by_orientation'
+    
+    if coord_filter is not None:
+        filter_x, filter_y, filter_z = coord_filter
+        # Format coordinates for filename (replace dots with underscores)
+        coord_str = f'_{filter_x}_{filter_y}_{filter_z}'.replace('.', '_')
+        base_name += coord_str
+    
+    output_file = output_dir / f'{base_name}.png'
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Saved orientation-based plot to {output_file}")
     plt.show()
@@ -309,14 +336,30 @@ def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[i
     print("="*80)
 
 def main():
-    if len(sys.argv) != 3:
-        print("Usage: uv run plot_single_anchor_measurements_by_orientation.py <csv_file> <anchor_id|all>")
+    if len(sys.argv) < 3 or len(sys.argv) > 4:
+        print("Usage: uv run plot_single_anchor_measurements_by_orientation.py <csv_file> <anchor_id|all> [x,y,z]")
         print("Example: uv run plot_single_anchor_measurements_by_orientation.py datapoints28oct.csv 0")
         print("Example: uv run plot_single_anchor_measurements_by_orientation.py datapoints28oct.csv all")
+        print("Example: uv run plot_single_anchor_measurements_by_orientation.py datapoints28oct.csv 3 0,0,0")
+        print("Example: uv run plot_single_anchor_measurements_by_orientation.py datapoints28oct.csv all 120.0,180.0,0.0")
         sys.exit(1)
     
     csv_file = Path(sys.argv[1])
     anchor_arg = sys.argv[2].lower()
+    
+    # Parse optional coordinate filter
+    coord_filter: Optional[Tuple[float, float, float]] = None
+    if len(sys.argv) == 4:
+        coord_str = sys.argv[3]
+        try:
+            coords = [float(x.strip()) for x in coord_str.split(',')]
+            if len(coords) != 3:
+                raise ValueError("Must provide exactly 3 coordinates")
+            coord_filter = (coords[0], coords[1], coords[2])
+        except ValueError as e:
+            print(f"Error: Invalid coordinate format '{coord_str}'. Expected format: x,y,z (e.g., 0,0,0 or 120.0,180.0,0.0)")
+            print(f"Details: {e}")
+            sys.exit(1)
     
     # Handle "all" case
     if anchor_arg == 'all':
@@ -342,13 +385,34 @@ def main():
     print(f"Loading data from {csv_file}...")
     df = pd.read_csv(csv_file)
     print(f"Loaded {len(df)} data points")
+    
+    # Apply coordinate filter if provided
+    if coord_filter is not None:
+        filter_x, filter_y, filter_z = coord_filter
+        original_count = len(df)
+        df_filtered = df[
+            (df['ground_truth_x'] == filter_x) &
+            (df['ground_truth_y'] == filter_y) &
+            (df['ground_truth_z'] == filter_z)
+        ]
+        # Ensure it's a DataFrame (not a Series)
+        if isinstance(df_filtered, pd.Series):
+            df_filtered = df_filtered.to_frame().T
+        df_filtered = df_filtered.copy()
+        filtered_count = len(df_filtered)
+        print(f"Filtered to coordinates ({filter_x}, {filter_y}, {filter_z}): {filtered_count} rows (from {original_count})")
+        if filtered_count == 0:
+            print(f"Warning: No data points found for coordinates ({filter_x}, {filter_y}, {filter_z})")
+            sys.exit(1)
+        df = df_filtered
+    
     if anchor_id is None:
         print(f"Analyzing measurements from all anchors by orientation...")
     else:
         print(f"Analyzing measurements from anchor {anchor_id} by orientation...")
     
     # Create visualizations colored by orientation
-    create_visualizations_by_orientation(df, anchor_id, output_dir)
+    create_visualizations_by_orientation(df, anchor_id, output_dir, coord_filter)
     
     print(f"\nAnalysis complete! Results saved to {output_dir}")
 
