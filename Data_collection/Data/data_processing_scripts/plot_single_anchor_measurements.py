@@ -7,12 +7,12 @@ Measurements are colored by ground truth position (not orientation).
 All measurements are transformed to global coordinates using the same transformation as PGO.
 
 Usage:
-    python plot_single_anchor_measurements.py <csv_file> <anchor_id>
+    uv run plot_single_anchor_measurements.py <csv_file> <anchor_id>
     
 Example:
     uv run plot_single_anchor_measurements.py datapoints28oct.csv 0
     in \Data_collection\Data:
-    python data_processing_scripts\plot_single_anchor_measurements.py 28oct\datapoints28oct.csv 3
+    uv run data_processing_scripts\plot_single_anchor_measurements.py 28oct\datapoints28oct.csv 3
 """
 
 import pandas as pd
