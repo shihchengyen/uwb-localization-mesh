@@ -18,6 +18,7 @@ Example:
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
 import json
 import sys
 from typing import Dict, List, Tuple, Optional
@@ -161,15 +162,19 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
     print(f"Found {len(unique_positions)} unique ground truth positions: {unique_positions}")
     # Use a colormap to assign colors to positions
     try:
+        # Use the recommended approach for newer matplotlib versions
+        cmap = plt.colormaps['tab10']
+    except (AttributeError, KeyError):
+        # Fallback for older matplotlib versions
         import matplotlib.cm as cm
         cmap = cm.get_cmap('tab10')
-    except AttributeError:
-        # For newer matplotlib versions
-        cmap = plt.colormaps['tab10']
     position_colors = {}
     for idx, pos_key in enumerate(unique_positions):
         # Normalize index to 0-1 range for colormap (using modulo to cycle through colors)
         position_colors[pos_key] = cmap((idx % 10) / 9.0)
+    
+    # Create list of colors for the anchors (distinct from tab10 position colors)
+    anchor_colors = ['red', 'orange', 'green', 'blue']
     
     # Create figure with subplots for each ground truth position
     sorted_positions = sorted(position_groups.keys())
@@ -193,16 +198,27 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
         # Get color for this ground truth position
         color = position_colors[pos_key]
         
-        # Plot all anchor positions (grey and small)
-        # Note: These are the 4 anchor positions, shown as grey squares for reference
-        # They are NOT measurement dots - they are the fixed anchor locations
+        # Plot all anchor positions with distinct colors
+        # Note: These are the 4 fixed anchor positions, shown as colored squares for reference
         for aid, anchor_pos in ANCHOR_POSITIONS.items():
-            ax.scatter([anchor_pos[0]], [anchor_pos[1]], c='grey', marker='s', s=100, 
-                      zorder=5, edgecolors='black', linewidths=1.5, label='Anchors' if aid == 0 else '')
+            # ax.scatter([anchor_pos[0]], [anchor_pos[1]], c=anchor_colors[aid], marker='s', s=60, 
+            #           zorder=6, edgecolors='black', linewidths=1.2, alpha=0.7, label='Anchors' if aid == 0 else '')
+            ax.scatter([anchor_pos[0]], [anchor_pos[1]], c='black', marker='s', s=60, 
+                      zorder=6, edgecolors='black', linewidths=1.2, alpha=0.5, label='Anchors' if aid == 0 else '')
         
-        # Plot ground truth position as a tiny cross in the same color
-        ax.scatter([gt_x], [gt_y], c=[color], marker='+', s=50, 
-                  zorder=6, linewidths=2)
+        # Circle the specified anchor with a thin red circle
+        specified_anchor_pos = ANCHOR_POSITIONS[anchor_id]
+        circle = Circle((specified_anchor_pos[0], specified_anchor_pos[1]), radius=60, 
+                       fill=False, edgecolor='red', linewidth=1.0, zorder=8)
+        ax.add_patch(circle)
+        
+        # # Plot ground truth position crosses 
+        # ax.scatter([gt_x], [gt_y], c=[color], marker='+', s=50, 
+        #           zorder=7, linewidths=2)
+        
+        # Plot ground truth position stars
+        ax.scatter([gt_x], [gt_y], c='black', marker='*', s=100, 
+                  zorder=5, edgecolors='black', linewidths=0.2, alpha=0.4)
         
         # Plot all phone positions from measurements for the specified anchor
         total_measurements = 0
@@ -217,7 +233,7 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
                 else:
                     plot_color = position_colors[pos_key]
                 ax.scatter(phone_pos_array[:, 0], phone_pos_array[:, 1], 
-                          c=[plot_color] * len(phone_pos_array), alpha=0.6, s=30, zorder=3)
+                          c=[plot_color] * len(phone_pos_array), alpha=0.4, s=15, zorder=3)
                 total_measurements += len(phone_positions)
         
         ax.set_xlabel('X (cm)')
@@ -226,6 +242,8 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
                     f'{total_measurements} measurements')
         ax.grid(True, alpha=0.3)
         ax.set_aspect('equal', adjustable='box')
+        ax.set_xlim(-200, 680)
+        ax.set_ylim(-300, 900)
     
     # Hide unused subplots
     for idx in range(n_positions, len(axes)):
@@ -240,12 +258,19 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
     # Create a combined plot showing all positions together
     fig, ax = plt.subplots(figsize=(12, 10))
     
-    # Plot all anchor positions (grey and small)
-    # Note: These are the 4 anchor positions, shown as grey squares for reference
-    # They are NOT measurement dots - they are the fixed anchor locations
+    # Plot all anchor positions with distinct colors
+    # Note: These are the 4 fixed anchor positions, shown as colored squares for reference
     for aid, anchor_pos in ANCHOR_POSITIONS.items():
-        ax.scatter([anchor_pos[0]], [anchor_pos[1]], c='grey', marker='s', s=100, 
-                  zorder=5, edgecolors='black', linewidths=1.5)
+        # ax.scatter([anchor_pos[0]], [anchor_pos[1]], c=anchor_colors[aid], marker='s', s=100, 
+        #           zorder=5, edgecolors='black', linewidths=1.2, alpha=0.7)
+        ax.scatter([anchor_pos[0]], [anchor_pos[1]], c='black', marker='s', s=60, 
+                    zorder=6, edgecolors='black', linewidths=1.2, alpha=0.5, label='Anchors' if aid == 0 else '')
+
+    # Circle the specified anchor with a thin red circle
+    specified_anchor_pos = ANCHOR_POSITIONS[anchor_id]
+    circle = Circle((specified_anchor_pos[0], specified_anchor_pos[1]), radius=40, 
+                   fill=False, edgecolor='red', linewidth=1.0, zorder=8)
+    ax.add_patch(circle)
     
     # Plot all measurements grouped by ground truth position
     for pos_key in sorted_positions:
@@ -254,9 +279,13 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
         
         color = position_colors[pos_key]
         
-        # Plot ground truth position as a tiny cross in the same color
-        ax.scatter([gt_x], [gt_y], c=[color], marker='+', s=50, 
-                  zorder=6, linewidths=2)
+        # # Plot ground truth position as a tiny cross in the same color
+        # ax.scatter([gt_x], [gt_y], c=[color], marker='+', s=50, 
+        #           zorder=6, linewidths=2)
+        
+        # Plot ground truth position stars
+        ax.scatter([gt_x], [gt_y], c='black', marker='*', s=170, 
+                  zorder=6, edgecolors='black', linewidths=0.2, alpha=0.4)
         
         # Plot all phone positions from the specified anchor
         for data in group_data:
@@ -277,6 +306,8 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
     ax.set_title(f'All Measurements from Anchor {anchor_id} at All Ground Truth Positions', fontsize=14)
     ax.grid(True, alpha=0.3)
     ax.set_aspect('equal', adjustable='box')
+    ax.set_xlim(-200, 680)
+    ax.set_ylim(-300, 900)
     
     plt.tight_layout()
     output_file = output_dir / f'anchor_{anchor_id}_all_measurements_combined.png'
