@@ -160,7 +160,7 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
     # Create color map for ground truth positions
     unique_positions = sorted(position_groups.keys())
     print(f"Found {len(unique_positions)} unique ground truth positions: {unique_positions}")
-    # Use a colormap to assign colors to positions
+    # Use tab10 colormap to assign colors to positions
     try:
         # Use the recommended approach for newer matplotlib versions
         cmap = plt.colormaps['tab10']
@@ -168,13 +168,17 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
         # Fallback for older matplotlib versions
         import matplotlib.cm as cm
         cmap = cm.get_cmap('tab10')
+    
+    # Position colors: blue, orange, green, red (tab10 indices 0, 1, 2, 3)
+    position_color_indices = [0, 1, 2, 3]  # blue, orange, green, red
     position_colors = {}
     for idx, pos_key in enumerate(unique_positions):
-        # Normalize index to 0-1 range for colormap (using modulo to cycle through colors)
-        position_colors[pos_key] = cmap((idx % 10) / 9.0)
+        color_idx = position_color_indices[idx % len(position_color_indices)]
+        position_colors[pos_key] = cmap(color_idx / 9.0)
     
-    # Create list of colors for the anchors (distinct from tab10 position colors)
-    anchor_colors = ['red', 'orange', 'green', 'blue']
+    # Anchor colors by tab10 indices 
+    anchor_color_indices = [4, 5, 6, 7]  # purple, brown, pink, grey
+    anchor_colors = [cmap(idx / 9.0) for idx in anchor_color_indices]
     
     # Create figure with subplots for each ground truth position
     sorted_positions = sorted(position_groups.keys())
@@ -201,10 +205,10 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
         # Plot all anchor positions with distinct colors
         # Note: These are the 4 fixed anchor positions, shown as colored squares for reference
         for aid, anchor_pos in ANCHOR_POSITIONS.items():
-            # ax.scatter([anchor_pos[0]], [anchor_pos[1]], c=anchor_colors[aid], marker='s', s=60, 
-            #           zorder=6, edgecolors='black', linewidths=1.2, alpha=0.7, label='Anchors' if aid == 0 else '')
-            ax.scatter([anchor_pos[0]], [anchor_pos[1]], c='black', marker='s', s=60, 
-                      zorder=6, edgecolors='black', linewidths=1.2, alpha=0.5, label='Anchors' if aid == 0 else '')
+            ax.scatter([anchor_pos[0]], [anchor_pos[1]], c=anchor_colors[aid], marker='s', s=45, 
+                      zorder=6, edgecolors='black', linewidths=1.2, alpha=0.8, label='Anchors' if aid == 0 else '')
+            # ax.scatter([anchor_pos[0]], [anchor_pos[1]], c='black', marker='s', s=60, 
+            #           zorder=6, edgecolors='black', linewidths=1.2, alpha=0.5, label='Anchors' if aid == 0 else '')
         
         # Circle the specified anchor with a thin red circle
         specified_anchor_pos = ANCHOR_POSITIONS[anchor_id]
@@ -261,10 +265,10 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
     # Plot all anchor positions with distinct colors
     # Note: These are the 4 fixed anchor positions, shown as colored squares for reference
     for aid, anchor_pos in ANCHOR_POSITIONS.items():
-        # ax.scatter([anchor_pos[0]], [anchor_pos[1]], c=anchor_colors[aid], marker='s', s=100, 
-        #           zorder=5, edgecolors='black', linewidths=1.2, alpha=0.7)
-        ax.scatter([anchor_pos[0]], [anchor_pos[1]], c='black', marker='s', s=60, 
-                    zorder=6, edgecolors='black', linewidths=1.2, alpha=0.5, label='Anchors' if aid == 0 else '')
+        ax.scatter([anchor_pos[0]], [anchor_pos[1]], c=anchor_colors[aid], marker='s', s=100, 
+                  zorder=5, edgecolors='black', linewidths=1.2, alpha=0.9)
+        # ax.scatter([anchor_pos[0]], [anchor_pos[1]], c='black', marker='s', s=60, 
+        #             zorder=6, edgecolors='black', linewidths=1.2, alpha=0.5, label='Anchors' if aid == 0 else '')
 
     # Circle the specified anchor with a thin red circle
     specified_anchor_pos = ANCHOR_POSITIONS[anchor_id]
