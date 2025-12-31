@@ -24,6 +24,7 @@ in \Data_collection\Data:
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
 import json
 import sys
 from typing import Dict, List, Tuple, Optional
@@ -221,34 +222,45 @@ def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[i
     unique_orientations = sorted(orientation_groups.keys())
     print(f"Found {len(unique_orientations)} unique orientations: {unique_orientations}")
     
-    # Use a colormap to assign colors to orientations
+    # Use tab10 colormap to assign colors to orientations
     try:
+        # Use the recommended approach for newer matplotlib versions
+        cmap = plt.colormaps['tab10']
+    except (AttributeError, KeyError):
+        # Fallback for older matplotlib versions
         import matplotlib.cm as cm
         cmap = cm.get_cmap('tab10')
-    except AttributeError:
-        # For newer matplotlib versions
-        cmap = plt.colormaps['tab10']
     
     orientation_colors = {}
     for idx, orient in enumerate(unique_orientations):
         # Normalize index to 0-1 range for colormap (using modulo to cycle through colors)
         orientation_colors[orient] = cmap((idx % 10) / 9.0)
     
+    # Anchor colors by tab10 indices
+    anchor_color_indices = [4, 5, 6, 7]  # purple, brown, pink, grey
+    anchor_colors = [cmap(idx / 9.0) for idx in anchor_color_indices]
+    
     # Create a combined plot showing all orientations together (same style as position-based plot)
     fig, ax = plt.subplots(figsize=(12, 10))
     
-    # Plot all anchor positions (grey and small)
-    # Note: These are the 4 anchor positions, shown as grey squares for reference
+    # Plot all anchor positions with distinct colors
+    # Note: These are the 4 fixed anchor positions, shown as colored squares for reference
     # They are NOT measurement dots - they are the fixed anchor locations
-    # zorder=1 ensures they appear below the measurement dots (zorder=3)
     for aid, anchor_pos in ANCHOR_POSITIONS.items():
-        ax.scatter([anchor_pos[0]], [anchor_pos[1]], c='grey', marker='s', s=100, 
-                  zorder=1, edgecolors='black', linewidths=1.5)
+        ax.scatter([anchor_pos[0]], [anchor_pos[1]], c=anchor_colors[aid], marker='s', s=100, 
+                  zorder=5, edgecolors='black', linewidths=1.2, alpha=0.9)
     
-    # Plot all ground truth positions as grey crosses (once, not per orientation)
+    # Circle the specified anchor with a thin red circle (if anchor_id is specified)
+    if anchor_id is not None:
+        specified_anchor_pos = ANCHOR_POSITIONS[anchor_id]
+        circle = Circle((specified_anchor_pos[0], specified_anchor_pos[1]), radius=40, 
+                       fill=False, edgecolor='red', linewidth=1.0, zorder=8)
+        ax.add_patch(circle)
+    
+    # Plot all ground truth positions as black stars (once, not per orientation)
     for gt_x, gt_y in all_gt_positions:
-        ax.scatter([gt_x], [gt_y], c='grey', marker='+', s=50, 
-                  zorder=6, linewidths=2)
+        ax.scatter([gt_x], [gt_y], c='black', marker='*', s=170, 
+                  zorder=6, edgecolors='black', linewidths=0.2, alpha=0.4)
     
     # Plot all measurements grouped by orientation
     for orient in unique_orientations:
@@ -283,6 +295,7 @@ def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[i
     ax.set_title(title, fontsize=14)
     ax.grid(True, alpha=0.3)
     ax.set_aspect('equal', adjustable='box')
+    ax.set_xlim(-100, 600)
     
     # Add legend
     ax.legend(loc='best', fontsize=10)
