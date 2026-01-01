@@ -19,6 +19,9 @@ in \Data_collection\Data:
     or
 
     uv run data_processing_scripts\plot_single_anchor_measurements_by_orientation.py 28oct\datapoints28oct.csv all 120.0,180.0,0.0
+    or
+
+    uv run data_processing_scripts\plot_single_anchor_measurements_by_orientation.py 28oct\datapoints28oct.csv all 120.0,180.0,0.0 --raw
 """
 
 import pandas as pd
@@ -87,20 +90,22 @@ def transform_local_to_global(anchor_id: int, local_vector: np.ndarray) -> np.nd
     """Transform local anchor measurement to global coordinates."""
     return ANCHOR_R[anchor_id] @ local_vector
 
-def extract_anchor_measurements(row, anchor_id: int) -> List[np.ndarray]:
+def extract_anchor_measurements(row, anchor_id: int, use_raw: bool = False) -> List[np.ndarray]:
     """
     Extract and transform measurements from a specific anchor.
     
     Args:
         row: DataFrame row containing measurement data
         anchor_id: ID of the anchor to extract measurements from
+        use_raw: If True, use raw_binned_data_json; if False, use filtered_binned_data_json
         
     Returns:
         List of global measurement vectors (X, Y only)
     """
     # Parse measurement data
-    filtered_data = json.loads(row['filtered_binned_data_json'])
-    measurements = filtered_data['measurements']
+    data_column = 'raw_binned_data_json' if use_raw else 'filtered_binned_data_json'
+    binned_data = json.loads(row[data_column])
+    measurements = binned_data['measurements']
     
     # Get measurements for this anchor
     anchor_id_str = str(anchor_id)
@@ -120,19 +125,21 @@ def extract_anchor_measurements(row, anchor_id: int) -> List[np.ndarray]:
     
     return global_measurements
 
-def extract_all_anchor_measurements(row) -> List[Tuple[int, np.ndarray]]:
+def extract_all_anchor_measurements(row, use_raw: bool = False) -> List[Tuple[int, np.ndarray]]:
     """
     Extract and transform measurements from all anchors.
     
     Args:
         row: DataFrame row containing measurement data
+        use_raw: If True, use raw_binned_data_json; if False, use filtered_binned_data_json
         
     Returns:
         List of tuples (anchor_id, global_measurement_vector) for all anchors
     """
     # Parse measurement data
-    filtered_data = json.loads(row['filtered_binned_data_json'])
-    measurements = filtered_data['measurements']
+    data_column = 'raw_binned_data_json' if use_raw else 'filtered_binned_data_json'
+    binned_data = json.loads(row[data_column])
+    measurements = binned_data['measurements']
     
     all_measurements = []
     for anchor_id in ANCHOR_POSITIONS.keys():
@@ -162,7 +169,7 @@ def calculate_phone_positions(anchor_id: int, global_measurements: List[np.ndarr
     phone_positions = [anchor_pos + meas for meas in global_measurements]
     return phone_positions
 
-def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[int], output_dir: Path, coord_filter: Optional[Tuple[float, float, float]] = None):
+def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[int], output_dir: Path, coord_filter: Optional[Tuple[float, float, float]] = None, use_raw: bool = False):
     """
     Create visualization plots for measurements, colored by phone orientation.
     
@@ -171,6 +178,7 @@ def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[i
         anchor_id: ID of anchor to plot, or None for all anchors combined
         output_dir: Directory to save output files
         coord_filter: Optional tuple (x, y, z) indicating filtered coordinates
+        use_raw: If True, use raw_binned_data_json; if False, use filtered_binned_data_json
     """
     
     # Group data by orientation
@@ -187,7 +195,7 @@ def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[i
         
         if anchor_id is None:
             # Extract measurements from all anchors
-            all_measurements = extract_all_anchor_measurements(row)
+            all_measurements = extract_all_anchor_measurements(row, use_raw)
             if all_measurements:
                 phone_positions = []
                 for aid, global_meas in all_measurements:
@@ -203,7 +211,7 @@ def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[i
                     })
         else:
             # Extract measurements for the specified anchor only
-            global_measurements = extract_anchor_measurements(row, anchor_id)
+            global_measurements = extract_anchor_measurements(row, anchor_id, use_raw)
             if global_measurements:
                 phone_positions = calculate_phone_positions(anchor_id, global_measurements)
                 
@@ -349,30 +357,37 @@ def create_visualizations_by_orientation(df: pd.DataFrame, anchor_id: Optional[i
     print("="*80)
 
 def main():
-    if len(sys.argv) < 3 or len(sys.argv) > 4:
-        print("Usage: uv run plot_single_anchor_measurements_by_orientation.py <csv_file> <anchor_id|all> [x,y,z]")
+    if len(sys.argv) < 3 or len(sys.argv) > 5:
+        print("Usage: uv run plot_single_anchor_measurements_by_orientation.py <csv_file> <anchor_id|all> [x,y,z] [--raw]")
         print("Example: uv run plot_single_anchor_measurements_by_orientation.py datapoints28oct.csv 0")
         print("Example: uv run plot_single_anchor_measurements_by_orientation.py datapoints28oct.csv all")
         print("Example: uv run plot_single_anchor_measurements_by_orientation.py datapoints28oct.csv 3 0,0,0")
         print("Example: uv run plot_single_anchor_measurements_by_orientation.py datapoints28oct.csv all 120.0,180.0,0.0")
+        print("Example: uv run plot_single_anchor_measurements_by_orientation.py datapoints28oct.csv 0 --raw")
         sys.exit(1)
     
     csv_file = Path(sys.argv[1])
     anchor_arg = sys.argv[2].lower()
     
+    # Check for --raw flag
+    use_raw = '--raw' in sys.argv or '-r' in sys.argv
+    
     # Parse optional coordinate filter
     coord_filter: Optional[Tuple[float, float, float]] = None
-    if len(sys.argv) == 4:
-        coord_str = sys.argv[3]
-        try:
-            coords = [float(x.strip()) for x in coord_str.split(',')]
-            if len(coords) != 3:
-                raise ValueError("Must provide exactly 3 coordinates")
-            coord_filter = (coords[0], coords[1], coords[2])
-        except ValueError as e:
-            print(f"Error: Invalid coordinate format '{coord_str}'. Expected format: x,y,z (e.g., 0,0,0 or 120.0,180.0,0.0)")
-            print(f"Details: {e}")
-            sys.exit(1)
+    for arg in sys.argv[3:]:
+        if arg not in ['--raw', '-r']:
+            coord_str = arg
+            try:
+                coords = [float(x.strip()) for x in coord_str.split(',')]
+                if len(coords) != 3:
+                    raise ValueError("Must provide exactly 3 coordinates")
+                coord_filter = (coords[0], coords[1], coords[2])
+            except ValueError as e:
+                if ',' in coord_str:  # Only show error if it looks like coordinates
+                    print(f"Error: Invalid coordinate format '{coord_str}'. Expected format: x,y,z (e.g., 0,0,0 or 120.0,180.0,0.0)")
+                    print(f"Details: {e}")
+                    sys.exit(1)
+            break
     
     # Handle "all" case
     if anchor_arg == 'all':
@@ -419,13 +434,14 @@ def main():
             sys.exit(1)
         df = df_filtered
     
+    data_type = "raw" if use_raw else "filtered"
     if anchor_id is None:
-        print(f"Analyzing measurements from all anchors by orientation...")
+        print(f"Analyzing {data_type} measurements from all anchors by orientation...")
     else:
-        print(f"Analyzing measurements from anchor {anchor_id} by orientation...")
+        print(f"Analyzing {data_type} measurements from anchor {anchor_id} by orientation...")
     
     # Create visualizations colored by orientation
-    create_visualizations_by_orientation(df, anchor_id, output_dir, coord_filter)
+    create_visualizations_by_orientation(df, anchor_id, output_dir, coord_filter, use_raw)
     
     print(f"\nAnalysis complete! Results saved to {output_dir}")
 
