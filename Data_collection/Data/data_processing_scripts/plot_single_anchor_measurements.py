@@ -7,12 +7,13 @@ Measurements are colored by ground truth position (not orientation).
 All measurements are transformed to global coordinates using the same transformation as PGO.
 
 Usage:
-    uv run plot_single_anchor_measurements.py <csv_file> <anchor_id>
+    uv run plot_single_anchor_measurements.py <csv_file> <anchor_id> [--raw]
     
 Example:
+in \Data_collection\Data:
     uv run plot_single_anchor_measurements.py datapoints28oct.csv 0
-    in \Data_collection\Data:
-    uv run data_processing_scripts\plot_single_anchor_measurements.py 28oct\datapoints28oct.csv 3
+    uv run plot_single_anchor_measurements.py datapoints28oct.csv 0 --raw
+
 """
 
 import pandas as pd
@@ -81,20 +82,22 @@ def transform_local_to_global(anchor_id: int, local_vector: np.ndarray) -> np.nd
     """Transform local anchor measurement to global coordinates."""
     return ANCHOR_R[anchor_id] @ local_vector
 
-def extract_anchor_measurements(row, anchor_id: int) -> List[np.ndarray]:
+def extract_anchor_measurements(row, anchor_id: int, use_raw: bool = False) -> List[np.ndarray]:
     """
     Extract and transform measurements from a specific anchor.
     
     Args:
         row: DataFrame row containing measurement data
         anchor_id: ID of the anchor to extract measurements from
+        use_raw: If True, use raw_binned_data_json; if False, use filtered_binned_data_json
         
     Returns:
         List of global measurement vectors (X, Y only)
     """
     # Parse measurement data
-    filtered_data = json.loads(row['filtered_binned_data_json'])
-    measurements = filtered_data['measurements']
+    data_column = 'raw_binned_data_json' if use_raw else 'filtered_binned_data_json'
+    binned_data = json.loads(row[data_column])
+    measurements = binned_data['measurements']
     
     # Get measurements for this anchor
     anchor_id_str = str(anchor_id)
@@ -129,7 +132,7 @@ def calculate_phone_positions(anchor_id: int, global_measurements: List[np.ndarr
     phone_positions = [anchor_pos + meas for meas in global_measurements]
     return phone_positions
 
-def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
+def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path, use_raw: bool = False):
     """Create visualization plots for measurements from specified anchor, colored by ground truth position."""
     
     # Group data by ground truth position (not orientation)
@@ -141,7 +144,7 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
         orientation = row['orientation']
         
         # Extract measurements for the specified anchor only
-        global_measurements = extract_anchor_measurements(row, anchor_id)
+        global_measurements = extract_anchor_measurements(row, anchor_id, use_raw)
         if global_measurements:
             phone_positions = calculate_phone_positions(anchor_id, global_measurements)
             
@@ -254,7 +257,8 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
         axes[idx].axis('off')
     
     plt.tight_layout()
-    output_file = output_dir / f'anchor_{anchor_id}_measurements_by_position.png'
+    data_type = 'raw' if use_raw else 'filtered'
+    output_file = output_dir / f'anchor_{anchor_id}_measurements_by_position_{data_type}.png'
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Saved plot to {output_file}")
     plt.show()
@@ -314,7 +318,8 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
     ax.set_ylim(-300, 900)
     
     plt.tight_layout()
-    output_file = output_dir / f'anchor_{anchor_id}_all_measurements_combined.png'
+    data_type = 'raw' if use_raw else 'filtered'
+    output_file = output_dir / f'anchor_{anchor_id}_all_measurements_combined_{data_type}.png'
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Saved combined plot to {output_file}")
     plt.show()
@@ -347,9 +352,10 @@ def create_visualizations(df: pd.DataFrame, anchor_id: int, output_dir: Path):
     print("="*80)
 
 def main():
-    if len(sys.argv) != 3:
-        print("Usage: python plot_single_anchor_measurements.py <csv_file> <anchor_id>")
+    if len(sys.argv) < 3 or len(sys.argv) > 4:
+        print("Usage: python plot_single_anchor_measurements.py <csv_file> <anchor_id> [--raw]")
         print("Example: python plot_single_anchor_measurements.py datapoints28oct.csv 0")
+        print("Example: python plot_single_anchor_measurements.py datapoints28oct.csv 0 --raw")
         sys.exit(1)
     
     csv_file = Path(sys.argv[1])
@@ -358,6 +364,9 @@ def main():
     except ValueError:
         print(f"Error: anchor_id must be an integer, got '{sys.argv[2]}'")
         sys.exit(1)
+    
+    # Check for --raw flag
+    use_raw = '--raw' in sys.argv or '-r' in sys.argv
     
     if anchor_id not in ANCHOR_POSITIONS:
         print(f"Error: anchor_id must be one of {list(ANCHOR_POSITIONS.keys())}")
@@ -373,10 +382,11 @@ def main():
     print(f"Loading data from {csv_file}...")
     df = pd.read_csv(csv_file)
     print(f"Loaded {len(df)} data points")
-    print(f"Analyzing measurements from anchor {anchor_id}...")
+    data_type = "raw" if use_raw else "filtered"
+    print(f"Analyzing {data_type} measurements from anchor {anchor_id}...")
     
     # Create visualizations filtered by anchor_id
-    create_visualizations(df, anchor_id, output_dir)
+    create_visualizations(df, anchor_id, output_dir, use_raw)
     
     print(f"\nAnalysis complete! Results saved to {output_dir}")
 
