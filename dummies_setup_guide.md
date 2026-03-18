@@ -144,9 +144,26 @@ You should see logs like:
 
 ## Step 7: Start Anchor 0 (RPi 0 Terminal)
 
+```bash
+# RPi's are configured to use the following static IPs
+# usernames and passwords are the hostnames
+# Please make sure your laptop is connected to the Hub WiFi Network: EDIC_HUB_LAN1
+# rpi0: 192.168.68.80
+# rpi1: 192.168.68.81
+# rpi2: 192.168.68.82
+# rpi3: 192.168.68.83
+
+ssh rpi0@192.168.68.80
+ssh rpi1@192.168.68.81
+ssh rpi2@192.168.68.82
+ssh rpi3@192.168.68.83
+```
+
 On your **first Raspberry Pi**, navigate to the project directory and run:
 
 ```bash
+# Change directory to the code directory
+cd uwb-localization-mesh
 # Replace YOUR_LAPTOP_IP with your laptop's IP
 uv run python Anchor_bring_up.py --anchor-id 0 --broker YOUR_LAPTOP_IP
 ```
@@ -183,6 +200,8 @@ Starting UWB measurement publishing...
 On your **second Raspberry Pi**:
 
 ```bash
+# Change directory to the code directory
+cd uwb-localization-mesh
 # Replace YOUR_LAPTOP_IP with your laptop's IP
 uv run python Anchor_bring_up.py --anchor-id 1 --broker YOUR_LAPTOP_IP
 ```
@@ -199,6 +218,8 @@ uv run python Anchor_bring_up.py --anchor-id 1 --broker 192.168.68.66
 On your **third Raspberry Pi**:
 
 ```bash
+# Change directory to the code directory
+cd uwb-localization-mesh
 # Replace YOUR_LAPTOP_IP with your laptop's IP
 uv run python Anchor_bring_up.py --anchor-id 2 --broker YOUR_LAPTOP_IP
 ```
@@ -215,6 +236,8 @@ uv run python Anchor_bring_up.py --anchor-id 2 --broker 192.168.68.66
 On your **fourth Raspberry Pi**:
 
 ```bash
+# Change directory to the code directory
+cd uwb-localization-mesh
 # Replace YOUR_LAPTOP_IP with your laptop's IP
 uv run python Anchor_bring_up.py --anchor-id 3 --broker YOUR_LAPTOP_IP
 ```
