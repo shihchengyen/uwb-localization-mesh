@@ -79,7 +79,10 @@ ping <laptop-ip>  # Example: ping 192.168.68.66
 2. Configure each RPi:
 
 **On RPi 0 (Anchor 0):**
+
 ```bash
+# Change to the code directory
+cd uwb-localization-mesh
 # Either use command line argument
 python Anchor_bring_up.py --anchor-id 0 --broker <laptop-ip>
 
